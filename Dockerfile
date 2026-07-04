@@ -13,8 +13,8 @@ RUN apk add --no-cache dcron
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
-# Run every 5 minutes
-RUN echo "*/5 * * * * /run.sh >> /var/log/cron.log 2>&1" > /etc/crontabs/root && \
+# Run every 1 minute
+RUN echo "* * * * * /run.sh >> /var/log/cron.log 2>&1" > /etc/crontabs/root && \
     touch /var/log/cron.log
 
 CMD ["crond", "-f", "-l", "8"]
