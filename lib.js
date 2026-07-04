@@ -5,7 +5,7 @@ export const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 export const STATE_FILE = process.env.STATE_FILE || "/data/state.json";
 export const HISTORY_FILE =
   process.env.HISTORY_FILE ||
-  path.join(path.dirname(process.env.STATE_FILE || "/data/state.json"), "history.json");
+  path.join(path.dirname(STATE_FILE), "history.json");
 
 const HISTORY_MAX = 200;
 

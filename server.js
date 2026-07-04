@@ -112,6 +112,7 @@ app.get("/", async (req, res) => {
     );
     res.set("Content-Type", "text/html; charset=utf-8").send(html);
   } catch (e) {
+    console.error("[ERROR] Failed to render admin page:", e);
     res.status(500).send("Internal Server Error");
   }
 });
@@ -121,7 +122,8 @@ app.get("/api/history", async (req, res) => {
     const history = await loadHistory();
     res.json(history);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("[ERROR] Failed to load history:", e);
+    res.status(500).json({ error: "Failed to load history" });
   }
 });
 
@@ -145,4 +147,5 @@ app.post("/api/test-discord", async (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`[SERVER] Admin GUI available at http://0.0.0.0:${PORT}`);
+  console.log("[SERVER] ⚠️  No authentication is enforced — restrict access to trusted networks (LAN/VPN only).");
 });
