@@ -19,7 +19,7 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY && VAPID_SUBJECT) {
   console.warn(
     "[PUSH] VAPID keys are not fully configured. " +
     "Set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, and VAPID_SUBJECT to enable Web Push. " +
-    "Generate keys with: node -e \"const wp=require('web-push'); const k=wp.generateVAPIDKeys(); console.log(JSON.stringify(k,null,2));\""
+    "Generate keys with: node -e \"import('web-push').then(wp => { const k = wp.default.generateVAPIDKeys(); console.log('VAPID_PUBLIC_KEY=' + k.publicKey); console.log('VAPID_PRIVATE_KEY=' + k.privateKey); })\""
   );
 }
 

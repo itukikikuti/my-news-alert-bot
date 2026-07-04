@@ -74,7 +74,7 @@
 
   async function unsubscribeFromPush() {
     try {
-      const registration = await navigator.serviceWorker.getRegistration("/sw.js");
+      const registration = await navigator.serviceWorker.getRegistration();
       if (!registration) {
         setStatus("未購読状態です。", false);
         return;
@@ -102,7 +102,7 @@
   async function checkSubscriptionState() {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
     try {
-      const registration = await navigator.serviceWorker.getRegistration("/sw.js");
+      const registration = await navigator.serviceWorker.getRegistration();
       if (!registration) return;
       const subscription = await registration.pushManager.getSubscription();
       if (subscription && subscribeBtn) {
