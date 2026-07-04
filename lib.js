@@ -8,6 +8,127 @@ export const HISTORY_FILE =
   path.join(path.dirname(STATE_FILE), "history.json");
 
 const HISTORY_MAX = 200;
+const SUMMARY_MAX_LENGTH = 120;
+const MAX_UNICODE_CODE_POINT = 0x10ffff;
+const ELLIPSIS_LENGTH = 1;
+
+function decodeHtmlEntities(text) {
+  const entities = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: "\"",
+    apos: "'",
+    nbsp: " ",
+  };
+
+  const toSafeCodePoint = (value, radix) => {
+    const codePoint = Number.parseInt(value, radix);
+    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > MAX_UNICODE_CODE_POINT) {
+      return "";
+    }
+    try {
+      return String.fromCodePoint(codePoint);
+    } catch {
+      return "";
+    }
+  };
+
+  return text
+    .replace(/&#(\d+);/g, (_, dec) => toSafeCodePoint(dec, 10))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => toSafeCodePoint(hex, 16))
+    .replace(/&([a-z]+);/gi, (_, name) => entities[name.toLowerCase()] ?? `&${name};`);
+}
+
+function stripHtmlTags(text) {
+  let inTag = false;
+  let result = "";
+
+  for (const ch of text) {
+    if (ch === "<") {
+      inTag = true;
+      continue;
+    }
+    if (ch === ">") {
+      inTag = false;
+      continue;
+    }
+    if (!inTag) {
+      result += ch;
+    }
+  }
+
+  return result;
+}
+
+export function cleanText(input) {
+  return stripHtmlTags(decodeHtmlEntities(String(input ?? "")))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateText(text, maxLength) {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - ELLIPSIS_LENGTH)).trimEnd()}…`;
+}
+
+export function extractOriginalUrl(rawLink) {
+  const link = String(rawLink ?? "").trim();
+  if (!link) return "";
+
+  try {
+    const parsed = new URL(link);
+    const candidate = parsed.searchParams.get("url") || parsed.searchParams.get("q");
+    if (candidate && /^https?:\/\//i.test(candidate)) {
+      return candidate;
+    }
+  } catch {
+    return link;
+  }
+
+  return link;
+}
+
+export function formatPublishedAt(rawDate) {
+  if (!rawDate) return "";
+  const date = new Date(rawDate);
+  if (Number.isNaN(date.getTime())) return "";
+  const formatted = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+  return `${formatted} JST`;
+}
+
+export function buildNotificationMessage({ title, summary, publishedAt, link }) {
+  const cleanTitle = cleanText(title) || "(no title)";
+  const cleanSummary = cleanText(summary);
+  const cleanLink = extractOriginalUrl(link);
+  const lines = [
+    "🔔 **新着ニュース**",
+    `**見出し**: ${cleanTitle}`,
+  ];
+
+  if (cleanSummary) {
+    lines.push(`**要約**: ${truncateText(cleanSummary, SUMMARY_MAX_LENGTH)}`);
+  }
+  if (publishedAt) {
+    const formatted = formatPublishedAt(publishedAt);
+    if (formatted) {
+      lines.push(`**公開**: ${formatted}`);
+    }
+  }
+  if (cleanLink) {
+    lines.push(`**リンク**: ${cleanLink}`);
+  }
+
+  return lines.join("\n");
+}
 
 export async function loadState() {
   try {
@@ -50,8 +171,13 @@ export async function recordNotification(entry) {
   await saveHistory(history);
 }
 
-export async function sendToDiscord(title, link) {
-  const content = `🔔 **新着ニュース！**\n【${title}】\n${link}`;
+export async function sendToDiscord(title, link, options = {}) {
+  const content = buildNotificationMessage({
+    title,
+    link,
+    summary: options.summary,
+    publishedAt: options.publishedAt,
+  });
   const res = await fetch(DISCORD_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

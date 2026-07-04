@@ -1,6 +1,8 @@
 import Parser from "rss-parser";
 import {
   DISCORD_WEBHOOK_URL,
+  cleanText,
+  extractOriginalUrl,
   loadState,
   saveState,
   sendToDiscord,
@@ -28,13 +30,20 @@ async function checkAndNotify() {
       if (!latest) continue;
 
       const entryId = latest.guid || latest.id || latest.link || latest.title;
-      const title = latest.title ?? "(no title)";
-      const link = latest.link ?? "";
+      const title = cleanText(latest.title) || "(no title)";
+      const link = extractOriginalUrl(latest.link);
+      const summary = latest.contentSnippet || latest.summary || latest.content || "";
+      const publishedAt = latest.published || latest.pubDate || latest.isoDate || latest.updated;
 
       const lastId = state[url];
       if (entryId && entryId !== lastId) {
-        await sendToDiscord(title, link);
-        await recordNotification({ title, link, feedUrl: url, sentAt: new Date().toISOString() });
+        await sendToDiscord(title, link, { summary, publishedAt });
+        await recordNotification({
+          title,
+          link,
+          feedUrl: url,
+          sentAt: new Date().toISOString(),
+        });
         state[url] = entryId;
         console.log(`[NOTIFIED] ${title}`);
       } else {
