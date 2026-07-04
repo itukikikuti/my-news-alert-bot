@@ -32,3 +32,16 @@ test("buildNotificationMessage builds readable message", () => {
   assert.ok(!message.includes("<b>"));
   assert.ok(!message.includes("&nbsp;"));
 });
+
+test("buildNotificationMessage truncates long summary", () => {
+  const longSummary = "あ".repeat(140);
+  const message = buildNotificationMessage({
+    title: "テスト",
+    summary: longSummary,
+    link: "https://example.com/article",
+  });
+
+  const summaryLine = message.split("\n").find((line) => line.startsWith("**要約**: "));
+  assert.ok(summaryLine);
+  assert.ok(summaryLine.endsWith("…"));
+});

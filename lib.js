@@ -9,6 +9,8 @@ export const HISTORY_FILE =
 
 const HISTORY_MAX = 200;
 const SUMMARY_MAX_LENGTH = 120;
+const MAX_UNICODE_CODEPOINT = 0x10ffff;
+const ELLIPSIS_LENGTH = 1;
 
 function decodeHtmlEntities(text) {
   const entities = {
@@ -22,7 +24,7 @@ function decodeHtmlEntities(text) {
 
   const toSafeCodePoint = (value, radix) => {
     const codePoint = Number.parseInt(value, radix);
-    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > MAX_UNICODE_CODEPOINT) {
       return "";
     }
     try {
@@ -40,15 +42,14 @@ function decodeHtmlEntities(text) {
 
 export function cleanText(input) {
   return decodeHtmlEntities(String(input ?? ""))
-    .replace(/<[^>]*>/g, "")
-    .replace(/[<>]/g, "")
+    .replace(/<[^>]*>?/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function truncateText(text, maxLength) {
   if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+  return `${text.slice(0, Math.max(0, maxLength - ELLIPSIS_LENGTH)).trimEnd()}…`;
 }
 
 export function extractOriginalUrl(rawLink) {
