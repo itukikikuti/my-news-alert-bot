@@ -4,7 +4,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY index.js lib.js server.js ./
+COPY index.js lib.js push.js server.js ./
+COPY public ./public
 
 # Install dcron for cron scheduling
 RUN apk add --no-cache dcron
