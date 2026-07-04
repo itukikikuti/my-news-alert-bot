@@ -4,6 +4,7 @@ import {
   buildNotificationMessage,
   cleanText,
   extractOriginalUrl,
+  formatPublishedAt,
 } from "../lib.js";
 
 test("cleanText removes html tags and decodes entities", () => {
@@ -44,4 +45,9 @@ test("buildNotificationMessage truncates long summary", () => {
   const summaryLine = message.split("\n").find((line) => line.startsWith("**要約**: "));
   assert.ok(summaryLine);
   assert.ok(summaryLine.endsWith("…"));
+});
+
+test("formatPublishedAt formats JST and handles invalid input", () => {
+  assert.equal(formatPublishedAt("2026-07-04T07:33:52Z"), "2026/07/04 16:33 JST");
+  assert.equal(formatPublishedAt("invalid"), "");
 });

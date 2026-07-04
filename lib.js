@@ -9,7 +9,7 @@ export const HISTORY_FILE =
 
 const HISTORY_MAX = 200;
 const SUMMARY_MAX_LENGTH = 120;
-const MAX_UNICODE_CODEPOINT = 0x10ffff;
+const MAX_UNICODE_CODE_POINT = 0x10ffff;
 const ELLIPSIS_LENGTH = 1;
 
 function decodeHtmlEntities(text) {
@@ -24,7 +24,7 @@ function decodeHtmlEntities(text) {
 
   const toSafeCodePoint = (value, radix) => {
     const codePoint = Number.parseInt(value, radix);
-    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > MAX_UNICODE_CODEPOINT) {
+    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > MAX_UNICODE_CODE_POINT) {
       return "";
     }
     try {
@@ -40,9 +40,29 @@ function decodeHtmlEntities(text) {
     .replace(/&([a-z]+);/gi, (_, name) => entities[name.toLowerCase()] ?? `&${name};`);
 }
 
+function stripHtmlTags(text) {
+  let inTag = false;
+  let result = "";
+
+  for (const ch of text) {
+    if (ch === "<") {
+      inTag = true;
+      continue;
+    }
+    if (ch === ">") {
+      inTag = false;
+      continue;
+    }
+    if (!inTag) {
+      result += ch;
+    }
+  }
+
+  return result;
+}
+
 export function cleanText(input) {
-  return decodeHtmlEntities(String(input ?? ""))
-    .replace(/<[^>]*>?/g, "")
+  return stripHtmlTags(decodeHtmlEntities(String(input ?? "")))
     .replace(/\s+/g, " ")
     .trim();
 }
