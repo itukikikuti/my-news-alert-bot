@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY index.js ./
+COPY index.js lib.js server.js ./
 
 # Install dcron for cron scheduling
 RUN apk add --no-cache dcron
@@ -13,8 +13,14 @@ RUN apk add --no-cache dcron
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
+# Entrypoint: starts crond + web server
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Run every 1 minute
 RUN echo "* * * * * /run.sh >> /var/log/cron.log 2>&1" > /etc/crontabs/root && \
     touch /var/log/cron.log
 
-CMD ["crond", "-f", "-l", "8"]
+EXPOSE 3334
+
+CMD ["/entrypoint.sh"]
