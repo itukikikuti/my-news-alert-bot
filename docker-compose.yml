@@ -7,5 +7,7 @@ services:
       - .env
     environment:
       - STATE_FILE=/data/state.json
+    ports:
+      - "${GUI_PORT:-3334}:${GUI_PORT:-3334}"
     volumes:
       - ./data:/data
