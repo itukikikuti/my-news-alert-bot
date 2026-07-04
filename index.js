@@ -8,6 +8,7 @@ import {
   sendToDiscord,
   recordNotification,
 } from "./lib.js";
+import { sendPushNotifications } from "./push.js";
 
 const parser = new Parser();
 
@@ -38,6 +39,9 @@ async function checkAndNotify() {
       const lastId = state[url];
       if (entryId && entryId !== lastId) {
         await sendToDiscord(title, link, { summary, publishedAt });
+        await sendPushNotifications({ title, body: summary ? cleanText(summary).slice(0, 120) : undefined, url: link }).catch((e) => {
+          console.error("[PUSH] Failed to send push notifications:", e);
+        });
         await recordNotification({
           title,
           link,
