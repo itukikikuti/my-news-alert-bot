@@ -17,6 +17,7 @@ test("extractOriginalUrl prefers query url", () => {
 });
 
 test("buildNotificationMessage builds readable message", () => {
+  const expectedLink = extractOriginalUrl("https://www.google.com/url?url=https%3A%2F%2Fnews.yahoo.co.jp%2Farticles%2Fabc");
   const message = buildNotificationMessage({
     title: "マイクロン、<b>広島</b>工場拡張",
     summary: "（ブルームバーグ）： 米メモリーチップ大手のマイクロン・テクノロジーは、<b>広島</b>工場&nbsp;...",
@@ -27,7 +28,7 @@ test("buildNotificationMessage builds readable message", () => {
   assert.ok(message.includes("**見出し**: マイクロン、広島工場拡張"));
   assert.ok(message.includes("**要約**:"));
   assert.ok(message.includes("**公開**:"));
-  assert.ok(message.includes("https://news.yahoo.co.jp/articles/abc"));
+  assert.ok(message.includes(expectedLink));
   assert.ok(!message.includes("<b>"));
   assert.ok(!message.includes("&nbsp;"));
 });

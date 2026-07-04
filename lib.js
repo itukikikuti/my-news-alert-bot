@@ -20,15 +20,28 @@ function decodeHtmlEntities(text) {
     nbsp: " ",
   };
 
+  const toSafeCodePoint = (value, radix) => {
+    const codePoint = Number.parseInt(value, radix);
+    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+      return "";
+    }
+    try {
+      return String.fromCodePoint(codePoint);
+    } catch {
+      return "";
+    }
+  };
+
   return text
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => toSafeCodePoint(dec, 10))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => toSafeCodePoint(hex, 16))
     .replace(/&([a-z]+);/gi, (_, name) => entities[name.toLowerCase()] ?? `&${name};`);
 }
 
 export function cleanText(input) {
   return decodeHtmlEntities(String(input ?? ""))
     .replace(/<[^>]*>/g, "")
+    .replace(/[<>]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
