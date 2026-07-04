@@ -1,11 +1,21 @@
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import {
   DISCORD_WEBHOOK_URL,
   loadHistory,
   sendToDiscord,
   recordNotification,
 } from "./lib.js";
+import {
+  VAPID_PUBLIC_KEY,
+  addSubscription,
+  removeSubscription,
+  sendPushNotifications,
+  isValidSubscription,
+} from "./push.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.GUI_PORT || "3334", 10);
 
 if (!DISCORD_WEBHOOK_URL) {
@@ -16,6 +26,7 @@ if (!DISCORD_WEBHOOK_URL) {
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
 function htmlEscape(str) {
   return String(str ?? "")
@@ -47,6 +58,10 @@ function renderPage(history, showSuccess, errorMessage) {
     ? `<div class="feedback error">❌ エラー: ${htmlEscape(errorMessage)}</div>`
     : "";
 
+  const vapidKeyScript = VAPID_PUBLIC_KEY
+    ? `<script>window.VAPID_PUBLIC_KEY = ${JSON.stringify(VAPID_PUBLIC_KEY)};</script>`
+    : "";
+
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -67,6 +82,8 @@ function renderPage(history, showSuccess, errorMessage) {
     input[name="link"]  { width: 320px; }
     button { padding: 0.45rem 1rem; background: #0070f3; color: #fff; border: none; border-radius: 4px; font-size: 0.95rem; cursor: pointer; white-space: nowrap; }
     button:hover { background: #0051a8; }
+    button.secondary { background: #6c757d; }
+    button.secondary:hover { background: #5a6268; }
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
     th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
     th { background: #f5f5f5; font-weight: 600; }
@@ -74,6 +91,7 @@ function renderPage(history, showSuccess, errorMessage) {
     a { color: #0070f3; word-break: break-all; }
     code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.82em; word-break: break-all; }
     .empty { color: #888; text-align: center; padding: 2rem; }
+    #push-status { display: none; margin: 1rem 0; }
   </style>
 </head>
 <body>
@@ -87,6 +105,13 @@ function renderPage(history, showSuccess, errorMessage) {
     <button type="submit">Discord へ送信</button>
   </form>
 
+  <h2>🔔 Web Push 通知</h2>
+  <div id="push-status" class="feedback"></div>
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+    <button id="push-subscribe-btn" type="button">Push通知を購読する</button>
+  </div>
+  <p style="font-size:0.85rem;color:#666;margin-top:0.5rem;">Android Chrome でこのページを開き、「Push通知を購読する」をタップしてください。</p>
+
   <h2>通知履歴（直近 ${history.length} 件）</h2>
   ${
     history.length === 0
@@ -98,6 +123,8 @@ function renderPage(history, showSuccess, errorMessage) {
     <tbody>${rows}</tbody>
   </table>`
   }
+  ${vapidKeyScript}
+  <script src="/push-client.js"></script>
 </body>
 </html>`;
 }
@@ -142,6 +169,52 @@ app.post("/api/test-discord", async (req, res) => {
     res.redirect("/?status=ok");
   } catch (e) {
     res.redirect(`/?error=${encodeURIComponent(e.message)}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Web Push API
+// ---------------------------------------------------------------------------
+
+app.post("/api/push/subscribe", async (req, res) => {
+  const sub = req.body;
+  if (!isValidSubscription(sub)) {
+    return res.status(400).json({ error: "Invalid subscription object" });
+  }
+  try {
+    await addSubscription(sub);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[ERROR] Failed to save subscription:", e);
+    res.status(500).json({ error: "Failed to save subscription" });
+  }
+});
+
+app.post("/api/push/unsubscribe", async (req, res) => {
+  const endpoint = String(req.body?.endpoint ?? "").trim();
+  if (!endpoint) {
+    return res.status(400).json({ error: "Missing endpoint" });
+  }
+  try {
+    await removeSubscription(endpoint);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[ERROR] Failed to remove subscription:", e);
+    res.status(500).json({ error: "Failed to remove subscription" });
+  }
+});
+
+app.post("/api/push/send", async (req, res) => {
+  const { title, body, url, icon, badge, tag } = req.body ?? {};
+  if (!title) {
+    return res.status(400).json({ error: "title is required" });
+  }
+  try {
+    const result = await sendPushNotifications({ title, body, url, icon, badge, tag });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    console.error("[ERROR] Failed to send push notifications:", e);
+    res.status(500).json({ error: "Failed to send push notifications" });
   }
 });
 
