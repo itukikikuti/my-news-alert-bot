@@ -1,0 +1,11 @@
+services:
+  news-bot:
+    build: .
+    container_name: my-news-alert-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - STATE_FILE=/data/state.json
+    volumes:
+      - ./data:/data
