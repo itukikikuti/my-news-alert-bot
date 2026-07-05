@@ -11,6 +11,7 @@ import {
   VAPID_PUBLIC_KEY,
   addSubscription,
   removeSubscription,
+  loadSubscriptions,
   sendPushNotifications,
   isValidSubscription,
 } from "./push.js";
@@ -80,10 +81,13 @@ function renderPage(history, showSuccess, errorMessage) {
     input[type="text"], input[type="url"] { padding: 0.45rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95rem; }
     input[name="title"] { width: 240px; }
     input[name="link"]  { width: 320px; }
+    textarea { padding: 0.45rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95rem; width: 100%; resize: vertical; }
     button { padding: 0.45rem 1rem; background: #0070f3; color: #fff; border: none; border-radius: 4px; font-size: 0.95rem; cursor: pointer; white-space: nowrap; }
     button:hover { background: #0051a8; }
     button.secondary { background: #6c757d; }
     button.secondary:hover { background: #5a6268; }
+    button.danger { background: #dc3545; }
+    button.danger:hover { background: #b02a37; }
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
     th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
     th { background: #f5f5f5; font-weight: 600; }
@@ -92,6 +96,14 @@ function renderPage(history, showSuccess, errorMessage) {
     code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.82em; word-break: break-all; }
     .empty { color: #888; text-align: center; padding: 2rem; }
     #push-status { display: none; margin: 1rem 0; }
+    #push-test-status { display: none; margin: 1rem 0; }
+    #sub-list-status { display: none; margin: 1rem 0; }
+    .push-test-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 560px; }
+    .push-test-form .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .push-test-form label { font-size: 0.9rem; min-width: 60px; }
+    #sub-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.85rem; }
+    #sub-table th, #sub-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #e0e0e0; vertical-align: middle; }
+    #sub-table th { background: #f5f5f5; }
   </style>
 </head>
 <body>
@@ -105,13 +117,37 @@ function renderPage(history, showSuccess, errorMessage) {
     <button type="submit">Discord へ送信</button>
   </form>
 
-  <h2>🔔 Web Push 通知</h2>
+  <h2>🔔 Web Push 購読</h2>
   <div id="push-status" class="feedback"></div>
   <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
     <button id="push-subscribe-btn" type="button">Push通知を購読する</button>
-    <button id="push-send-test-btn" type="button" class="secondary">Web Push をテスト送信</button>
   </div>
-  <p style="font-size:0.85rem;color:#666;margin-top:0.5rem;">Android Chrome でこのページを開き、「Push通知を購読する」で購読後、「Web Push をテスト送信」で配信確認できます。</p>
+  <p style="font-size:0.85rem;color:#666;margin-top:0.5rem;">Android Chrome でこのページを開き、「Push通知を購読する」で購読後、下のフォームで動作確認できます。</p>
+
+  <h2>🧪 Web Push テスト送信</h2>
+  <div id="push-test-status" class="feedback"></div>
+  <div class="push-test-form">
+    <div class="row">
+      <label for="push-test-title">タイトル</label>
+      <input type="text" id="push-test-title" placeholder="通知タイトル" maxlength="200" value="テスト通知" style="flex:1;">
+    </div>
+    <div class="row" style="align-items:flex-start;">
+      <label for="push-test-body" style="padding-top:0.4rem;">本文</label>
+      <textarea id="push-test-body" rows="2" placeholder="通知本文（省略可）" maxlength="500" style="flex:1;">Web Push 動作確認</textarea>
+    </div>
+    <div class="row">
+      <label for="push-test-url">URL</label>
+      <input type="url" id="push-test-url" placeholder="クリック時に開くURL（省略可）" maxlength="2000" style="flex:1;">
+    </div>
+    <div class="row">
+      <button id="push-send-test-btn" type="button" class="secondary">Web Push をテスト送信</button>
+    </div>
+  </div>
+
+  <h2>📋 購読管理</h2>
+  <div id="sub-list-status" class="feedback"></div>
+  <button id="sub-reload-btn" type="button" class="secondary" style="margin-bottom:0.5rem;">購読一覧を更新</button>
+  <div id="sub-list-container"><p class="empty">読み込み中...</p></div>
 
   <h2>通知履歴（直近 ${history.length} 件）</h2>
   ${
@@ -176,6 +212,18 @@ app.post("/api/test-discord", async (req, res) => {
 // ---------------------------------------------------------------------------
 // Web Push API
 // ---------------------------------------------------------------------------
+
+app.get("/api/push/subscriptions", async (req, res) => {
+  try {
+    const subscriptions = await loadSubscriptions();
+    // Return only the endpoint (no keys) for display purposes
+    const list = subscriptions.map((s) => ({ endpoint: s.endpoint }));
+    res.json(list);
+  } catch (e) {
+    console.error("[ERROR] Failed to load subscriptions:", e);
+    res.status(500).json({ error: "Failed to load subscriptions" });
+  }
+});
 
 app.post("/api/push/subscribe", async (req, res) => {
   const sub = req.body;
