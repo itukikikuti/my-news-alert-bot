@@ -123,17 +123,27 @@
         return;
       }
 
+      const hasCounts =
+        typeof result.sent === "number" &&
+        typeof result.failed === "number" &&
+        typeof result.removed === "number";
+
+      if (!hasCounts) {
+        setStatus("✅ Web Push のテスト送信リクエストを受け付けました。", false);
+        return;
+      }
+
       if (result.sent === 0 && result.failed === 0 && result.removed === 0) {
         setStatus("❌ 送信先の Push 購読がありません。先に「Push通知を購読する」を実行してください。", true);
         return;
       }
 
-      if (result.sent === 0 && result.failed > 0) {
-        setStatus(`❌ Web Push のテスト送信に失敗しました（失敗: ${result.failed}件）`, true);
+      if (result.sent > 0) {
+        setStatus(`✅ Web Push をテスト送信しました（成功: ${result.sent}件 / 失敗: ${result.failed}件 / 削除: ${result.removed}件）`, false);
         return;
       }
 
-      setStatus(`✅ Web Push をテスト送信しました（成功: ${result.sent}件 / 失敗: ${result.failed}件 / 削除: ${result.removed}件）`, false);
+      setStatus(`❌ Web Push のテスト送信に失敗しました（失敗: ${result.failed}件 / 削除: ${result.removed}件）`, true);
     } catch (err) {
       setStatus("❌ Web Push のテスト送信でエラーが発生しました: " + err.message, true);
     }

@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import os from "node:os";
 
 const SERVER_PORT = "34567";
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}/`;
+const TMP_DIR = `${os.tmpdir()}/my-news-alert-bot-server-test`;
 
 async function waitForServerReady() {
   const deadline = Date.now() + 10000;
@@ -24,16 +26,16 @@ async function waitForServerReady() {
   throw new Error("Timed out waiting for server");
 }
 
-test("admin page exposes separate Discord and Web Push test actions", async () => {
+test("admin page displays separate Discord and Web Push test actions", async () => {
   const child = spawn(process.execPath, ["server.js"], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       GUI_PORT: SERVER_PORT,
       DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123456789012345678/mock-token",
-      STATE_FILE: "/tmp/my-news-alert-bot-server-test/state.json",
-      HISTORY_FILE: "/tmp/my-news-alert-bot-server-test/history.json",
-      SUBSCRIPTIONS_FILE: "/tmp/my-news-alert-bot-server-test/subscriptions.json",
+      STATE_FILE: `${TMP_DIR}/state.json`,
+      HISTORY_FILE: `${TMP_DIR}/history.json`,
+      SUBSCRIPTIONS_FILE: `${TMP_DIR}/subscriptions.json`,
     },
     stdio: "ignore",
   });
