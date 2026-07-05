@@ -1,8 +1,13 @@
 import fs from "fs/promises";
 import path from "path";
 
-export const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+export const STATE_FILE = process.env.STATE_FILE || "/data/state.json";
+export const HISTORY_FILE =
+  process.env.HISTORY_FILE ||
+  path.join(path.dirname(STATE_FILE), "history.json");
 
+// Dynamic getters allow tests to override STATE_FILE / HISTORY_FILE env vars
+// at call-time, matching the pattern used in push.js for SUBSCRIPTIONS_FILE.
 function getStateFile() {
   return process.env.STATE_FILE || "/data/state.json";
 }
@@ -13,9 +18,7 @@ function getHistoryFile() {
 }
 
 const HISTORY_MAX = 200;
-const SUMMARY_MAX_LENGTH = 120;
 const MAX_UNICODE_CODE_POINT = 0x10ffff;
-const ELLIPSIS_LENGTH = 1;
 
 function decodeHtmlEntities(text) {
   const entities = {
@@ -72,11 +75,6 @@ export function cleanText(input) {
     .trim();
 }
 
-function truncateText(text, maxLength) {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(0, maxLength - ELLIPSIS_LENGTH)).trimEnd()}…`;
-}
-
 /**
  * Derive a stable deduplication key for an RSS/Atom feed item.
  * Priority:
@@ -129,31 +127,6 @@ export function formatPublishedAt(rawDate) {
   return `${formatted} JST`;
 }
 
-export function buildNotificationMessage({ title, summary, publishedAt, link }) {
-  const cleanTitle = cleanText(title) || "(no title)";
-  const cleanSummary = cleanText(summary);
-  const cleanLink = extractOriginalUrl(link);
-  const lines = [
-    "🔔 **新着ニュース**",
-    `**見出し**: ${cleanTitle}`,
-  ];
-
-  if (cleanSummary) {
-    lines.push(`**要約**: ${truncateText(cleanSummary, SUMMARY_MAX_LENGTH)}`);
-  }
-  if (publishedAt) {
-    const formatted = formatPublishedAt(publishedAt);
-    if (formatted) {
-      lines.push(`**公開**: ${formatted}`);
-    }
-  }
-  if (cleanLink) {
-    lines.push(`**リンク**: ${cleanLink}`);
-  }
-
-  return lines.join("\n");
-}
-
 export async function loadState() {
   const stateFile = getStateFile();
   try {
@@ -199,21 +172,61 @@ export async function recordNotification(entry) {
   await saveHistory(history);
 }
 
-export async function sendToDiscord(title, link, options = {}) {
-  const content = buildNotificationMessage({
-    title,
-    link,
-    summary: options.summary,
-    publishedAt: options.publishedAt,
-  });
-  const res = await fetch(DISCORD_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
+// ---------------------------------------------------------------------------
+// RSS URL management
+// ---------------------------------------------------------------------------
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Discord webhook failed: ${res.status} ${text}`);
+function getRSSUrlsFile() {
+  if (process.env.RSS_URLS_FILE) return process.env.RSS_URLS_FILE;
+  return path.join(path.dirname(getStateFile()), "rss-urls.json");
+}
+
+export async function loadRSSUrls() {
+  const file = getRSSUrlsFile();
+  try {
+    const raw = await fs.readFile(file, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.filter((u) => typeof u === "string" && u.trim());
+    }
+  } catch (e) {
+    if (e.code !== "ENOENT") {
+      console.error("[WARN] Failed to load RSS URLs file:", e);
+    }
   }
+  // Fall back to environment variable
+  return process.env.RSS_URLS?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+}
+
+export async function saveRSSUrls(urls) {
+  const file = getRSSUrlsFile();
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(urls, null, 2), "utf-8");
+}
+
+export function isValidRSSUrl(url) {
+  if (typeof url !== "string") return false;
+  return /^https?:\/\/.+/i.test(url.trim());
+}
+
+export async function addRSSUrl(url) {
+  const trimmed = String(url ?? "").trim();
+  if (!isValidRSSUrl(trimmed)) {
+    throw new Error("Invalid URL: must start with http:// or https://");
+  }
+  const urls = await loadRSSUrls();
+  if (urls.includes(trimmed)) {
+    throw new Error("URL already exists");
+  }
+  urls.push(trimmed);
+  await saveRSSUrls(urls);
+  return urls;
+}
+
+export async function removeRSSUrl(url) {
+  const trimmed = String(url ?? "").trim();
+  const urls = await loadRSSUrls();
+  const filtered = urls.filter((u) => u !== trimmed);
+  await saveRSSUrls(filtered);
+  return filtered;
 }

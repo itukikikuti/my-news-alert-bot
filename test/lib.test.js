@@ -1,16 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import os from "node:os";
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import {
-  buildNotificationMessage,
   cleanText,
   deriveEntryKey,
   extractOriginalUrl,
   formatPublishedAt,
+  isValidRSSUrl,
   loadHistory,
+  loadRSSUrls,
   loadState,
+  addRSSUrl,
+  removeRSSUrl,
   recordNotification,
   saveHistory,
   saveState,
@@ -24,36 +27,6 @@ test("cleanText removes html tags and decodes entities", () => {
 test("extractOriginalUrl prefers query url", () => {
   const input = "https://www.google.com/url?sa=t&url=https%3A%2F%2Fnews.yahoo.co.jp%2Farticles%2Fabc";
   assert.equal(extractOriginalUrl(input), "https://news.yahoo.co.jp/articles/abc");
-});
-
-test("buildNotificationMessage builds readable message", () => {
-  const expectedLink = extractOriginalUrl("https://www.google.com/url?url=https%3A%2F%2Fnews.yahoo.co.jp%2Farticles%2Fabc");
-  const message = buildNotificationMessage({
-    title: "マイクロン、<b>広島</b>工場拡張",
-    summary: "（ブルームバーグ）： 米メモリーチップ大手のマイクロン・テクノロジーは、<b>広島</b>工場&nbsp;...",
-    publishedAt: "2026-07-04T07:33:52Z",
-    link: "https://www.google.com/url?url=https%3A%2F%2Fnews.yahoo.co.jp%2Farticles%2Fabc",
-  });
-
-  assert.ok(message.includes("**見出し**: マイクロン、広島工場拡張"));
-  assert.ok(message.includes("**要約**:"));
-  assert.ok(message.includes("**公開**:"));
-  assert.ok(message.includes(expectedLink));
-  assert.ok(!message.includes("<b>"));
-  assert.ok(!message.includes("&nbsp;"));
-});
-
-test("buildNotificationMessage truncates long summary", () => {
-  const longSummary = "あ".repeat(140);
-  const message = buildNotificationMessage({
-    title: "テスト",
-    summary: longSummary,
-    link: "https://example.com/article",
-  });
-
-  const summaryLine = message.split("\n").find((line) => line.startsWith("**要約**: "));
-  assert.ok(summaryLine);
-  assert.ok(summaryLine.endsWith("…"));
 });
 
 test("formatPublishedAt formats JST and handles invalid input", () => {
@@ -119,9 +92,20 @@ test("deriveEntryKey: different IDs → different keys even with same title", ()
   assert.notEqual(deriveEntryKey(item1), deriveEntryKey(item2));
 });
 
+test("multiple entries: all are collected as distinct keys", () => {
+  const items = [
+    { id: "tag:google.com,2013:googlealerts/feed:e1", title: "Entry 1" },
+    { id: "tag:google.com,2013:googlealerts/feed:e2", title: "Entry 2" },
+    { id: "tag:google.com,2013:googlealerts/feed:e3", title: "Entry 3" },
+  ];
+  const keys = items.map(deriveEntryKey);
+  const unique = new Set(keys);
+  assert.equal(unique.size, 3, "all three entries must have distinct keys");
+});
+
 // ---------------------------------------------------------------------------
-// Multi-entry / deduplication / restart integration tests
-// (These test loadState/saveState/recordNotification/loadHistory via temp files)
+// State / history round-trip tests
+// (Override STATE_FILE / HISTORY_FILE env vars via temp dirs for isolation)
 // ---------------------------------------------------------------------------
 
 async function withTempDataDir(fn) {
@@ -158,7 +142,7 @@ test("saveState and loadState round-trip array of seen keys", async () => {
   });
 });
 
-test("recordNotification stores entry with all fields and caps at HISTORY_MAX", async () => {
+test("recordNotification stores entry with all fields", async () => {
   await withTempDataDir(async () => {
     const entry = {
       title: "Test Title",
@@ -181,11 +165,9 @@ test("recordNotification stores entry with all fields and caps at HISTORY_MAX", 
 test("state migration: old string lastId is treated as single seen key", async () => {
   await withTempDataDir(async () => {
     const feedUrl = "https://www.google.com/alerts/feeds/123/456";
-    // Simulate old-format state (single string ID)
     await saveState({ [feedUrl]: "tag:google.com,2013:googlealerts/feed:oldId" });
     const state = await loadState();
     const rawState = state[feedUrl];
-    // Verify the migration logic used in index.js
     const seenKeys = new Set(
       Array.isArray(rawState)
         ? rawState
@@ -200,30 +182,123 @@ test("state migration: old string lastId is treated as single seen key", async (
 test("restart scenario: already-seen keys are not re-notified", async () => {
   await withTempDataDir(async () => {
     const feedUrl = "https://www.google.com/alerts/feeds/123/456";
-    const sentKeys = ["id:tag:a", "id:tag:b"];
-    await saveState({ [feedUrl]: sentKeys });
-
-    // Simulate loading state and checking items
+    await saveState({ [feedUrl]: ["id:tag:a", "id:tag:b"] });
     const state = await loadState();
     const rawState = state[feedUrl];
     const seenKeys = new Set(Array.isArray(rawState) ? rawState : []);
-
-    // All previously sent items should be in seenKeys
     assert.ok(seenKeys.has("id:tag:a"));
     assert.ok(seenKeys.has("id:tag:b"));
-
-    // A new item should NOT be in seenKeys
     assert.ok(!seenKeys.has("id:tag:c"));
   });
 });
 
-test("multiple entries: all are collected as distinct keys", () => {
-  const items = [
-    { id: "tag:google.com,2013:googlealerts/feed:e1", title: "Entry 1" },
-    { id: "tag:google.com,2013:googlealerts/feed:e2", title: "Entry 2" },
-    { id: "tag:google.com,2013:googlealerts/feed:e3", title: "Entry 3" },
-  ];
-  const keys = items.map(deriveEntryKey);
-  const unique = new Set(keys);
-  assert.equal(unique.size, 3, "all three entries must have distinct keys");
+// ---------------------------------------------------------------------------
+// isValidRSSUrl
+// ---------------------------------------------------------------------------
+
+test("isValidRSSUrl accepts https URL", () => {
+  assert.equal(isValidRSSUrl("https://example.com/feed"), true);
+});
+
+test("isValidRSSUrl accepts http URL", () => {
+  assert.equal(isValidRSSUrl("http://example.com/feed"), true);
+});
+
+test("isValidRSSUrl rejects non-http URL", () => {
+  assert.equal(isValidRSSUrl("ftp://example.com/feed"), false);
+});
+
+test("isValidRSSUrl rejects empty string", () => {
+  assert.equal(isValidRSSUrl(""), false);
+});
+
+test("isValidRSSUrl rejects non-string", () => {
+  assert.equal(isValidRSSUrl(null), false);
+});
+
+// ---------------------------------------------------------------------------
+// loadRSSUrls / addRSSUrl / removeRSSUrl
+// (Override RSS_URLS_FILE env var to a tmp file for isolation)
+// ---------------------------------------------------------------------------
+
+async function withTempRSSFile(fn) {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rss-test-"));
+  const tmpFile = path.join(tmpDir, "rss-urls.json");
+  const originalFile = process.env.RSS_URLS_FILE;
+  const originalUrls = process.env.RSS_URLS;
+  process.env.RSS_URLS_FILE = tmpFile;
+  delete process.env.RSS_URLS;
+  try {
+    await fn(tmpFile);
+  } finally {
+    if (originalFile === undefined) {
+      delete process.env.RSS_URLS_FILE;
+    } else {
+      process.env.RSS_URLS_FILE = originalFile;
+    }
+    if (originalUrls === undefined) {
+      delete process.env.RSS_URLS;
+    } else {
+      process.env.RSS_URLS = originalUrls;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+}
+
+test("loadRSSUrls returns empty array when file does not exist and no env var", async () => {
+  await withTempRSSFile(async () => {
+    const urls = await loadRSSUrls();
+    assert.deepEqual(urls, []);
+  });
+});
+
+test("addRSSUrl persists a URL", async () => {
+  await withTempRSSFile(async () => {
+    await addRSSUrl("https://feeds.example.com/news");
+    const urls = await loadRSSUrls();
+    assert.equal(urls.length, 1);
+    assert.equal(urls[0], "https://feeds.example.com/news");
+  });
+});
+
+test("addRSSUrl rejects duplicate URL", async () => {
+  await withTempRSSFile(async () => {
+    await addRSSUrl("https://feeds.example.com/news");
+    await assert.rejects(
+      () => addRSSUrl("https://feeds.example.com/news"),
+      /already exists/
+    );
+  });
+});
+
+test("addRSSUrl rejects invalid URL", async () => {
+  await withTempRSSFile(async () => {
+    await assert.rejects(
+      () => addRSSUrl("not-a-url"),
+      /Invalid URL/
+    );
+  });
+});
+
+test("removeRSSUrl removes the specified URL", async () => {
+  await withTempRSSFile(async () => {
+    await addRSSUrl("https://feeds.example.com/a");
+    await addRSSUrl("https://feeds.example.com/b");
+    await removeRSSUrl("https://feeds.example.com/a");
+    const urls = await loadRSSUrls();
+    assert.equal(urls.length, 1);
+    assert.equal(urls[0], "https://feeds.example.com/b");
+  });
+});
+
+test("loadRSSUrls falls back to RSS_URLS env var when file does not exist", async () => {
+  await withTempRSSFile(async () => {
+    process.env.RSS_URLS = "https://env.example.com/feed1,https://env.example.com/feed2";
+    try {
+      const urls = await loadRSSUrls();
+      assert.deepEqual(urls, ["https://env.example.com/feed1", "https://env.example.com/feed2"]);
+    } finally {
+      delete process.env.RSS_URLS;
+    }
+  });
 });

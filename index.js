@@ -1,31 +1,26 @@
 import Parser from "rss-parser";
 import {
-  DISCORD_WEBHOOK_URL,
   cleanText,
   extractOriginalUrl,
   deriveEntryKey,
   loadState,
   saveState,
-  sendToDiscord,
+  loadRSSUrls,
   recordNotification,
 } from "./lib.js";
 import { sendPushNotifications } from "./push.js";
 
 const parser = new Parser();
 
-const RSS_URLS = process.env.RSS_URLS?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
-
 // Maximum number of seen entry keys kept per feed to prevent unbounded state growth.
 const MAX_SEEN_KEYS = 500;
 
-if (!DISCORD_WEBHOOK_URL) {
-  throw new Error("DISCORD_WEBHOOK_URL is not set");
-}
-if (RSS_URLS.length === 0) {
-  throw new Error("RSS_URLS is not set");
-}
-
 async function checkAndNotify() {
+  const RSS_URLS = await loadRSSUrls();
+  if (RSS_URLS.length === 0) {
+    throw new Error("No RSS URLs configured. Add URLs via the admin UI or set RSS_URLS env var as fallback.");
+  }
+
   const state = await loadState();
 
   for (const url of RSS_URLS) {
@@ -47,7 +42,7 @@ async function checkAndNotify() {
           : []
       );
 
-      // Process items oldest-first so Discord receives them in chronological order.
+      // Process items oldest-first so notifications arrive in chronological order.
       const orderedItems = [...items].reverse();
       let notifiedCount = 0;
 
@@ -63,7 +58,6 @@ async function checkAndNotify() {
         const summary = item.contentSnippet || item.summary || item.content || "";
         const publishedAt = item.isoDate || item.pubDate || item.published || item.updated || null;
 
-        await sendToDiscord(title, link, { summary, publishedAt });
         await sendPushNotifications({
           title,
           body: summary ? cleanText(summary).slice(0, 120) : undefined,

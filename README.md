@@ -1,14 +1,13 @@
 # my-news-alert-bot
 
-RSS フィードを定期チェックして、新着記事を Discord に通知する自己ホスト型ボットです。  
+RSS フィードを定期チェックして、新着記事を Web Push で通知する自己ホスト型ボットです。  
 Docker Compose で簡単に自宅サーバへデプロイできます。  
-**Web Push（Android Chrome 対応）** にも対応しており、ブラウザから直接プッシュ通知を受け取れます。
+**Web Push（Android Chrome 対応）** に対応しており、ブラウザから直接プッシュ通知を受け取れます。
 
 ## 機能
 
 - 複数の RSS フィードを 1 分ごとにポーリング
-- 新着エントリが見つかったときだけ Discord へ通知
-- **Web Push 通知**（Android Chrome）— ブラウザから購読して通知を受信
+- 新着エントリが見つかったときだけ **Web Push 通知**を送信
   - タイトル・本文・通知アイコン・バッジアイコンを表示
   - 対応ブラウザでは「記事を開く」アクションボタンを表示、非対応時は通知タップで記事を開く
 - 通知時にタイトル/本文の HTML タグ・HTML エンティティを整形し、読みやすい形式で表示
@@ -16,8 +15,9 @@ Docker Compose で簡単に自宅サーバへデプロイできます。
 - 通知済み ID を `/data/state.json` に保存し、再起動後に重複通知しない
 - フィード単位でエラーハンドリング（1 件失敗しても他フィードは継続）
 - **Web GUI 管理画面**（ポート 3334）で以下が可能：
-  - Discord テスト通知送信
+  - **RSS フィード管理** — 監視対象 URL の一覧・追加・削除
   - Web Push テスト送信（任意のタイトル・本文・URL を指定可能）
+  - Web Push 購読 / 解除
   - Push 購読管理（一覧表示・個別削除）
   - 通知履歴の確認
 
@@ -33,7 +33,6 @@ cp .env.example .env
 
 ```env
 RSS_URLS=https://www.google.co.jp/alerts/feeds/xxxxx/yyyyy
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxxxx/yyyyy
 ```
 
 複数フィードはカンマ区切りで指定できます。
@@ -41,6 +40,8 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxxxx/yyyyy
 ```env
 RSS_URLS=https://feed1.example.com/rss,https://feed2.example.com/rss
 ```
+
+> **ヒント**: RSS フィード URL は管理画面から追加・削除することもできます。環境変数 `RSS_URLS` はファイルが存在しない場合の初期値として使用されます。
 
 GUI のポートを変更したい場合は `GUI_PORT` を追加してください（デフォルト: `3334`）。
 
@@ -64,8 +65,8 @@ http://localhost:3334
 
 管理画面では以下の操作が可能です。
 
+- **RSS フィード管理** — 監視対象 URL の一覧表示・追加・削除（`/data/rss-urls.json` に永続化）
 - **通知履歴の確認** — 過去に送信した通知のタイトル・リンク・送信時刻・フィード URL を一覧で確認できます（最大 200 件）
-- **Discord テスト通知の送信** — タイトルと URL を入力して、Discord へテスト通知を即座に送信できます
 - **Web Push テスト送信** — タイトル・本文・URL を自由に指定して Push 通知を送信し、動作確認できます
 - **Web Push 購読 / 解除** — 「Push通知を購読する」で Android Chrome からプッシュ通知を受け取れます
 - **購読管理** — サーバーに登録されている Push 購読の一覧を確認し、個別に削除できます
@@ -169,7 +170,9 @@ Web Push 通知では以下のアイコンが使用されます。
 |---------|------|------|
 | `GET` | `/` | Web GUI 管理画面 |
 | `GET` | `/api/history` | 通知履歴を JSON で返す |
-| `POST` | `/api/test-discord` | テスト通知を Discord へ送信（フォームボディ: `title`, `link`）|
+| `GET` | `/api/rss` | 監視中の RSS URL 一覧を JSON で返す |
+| `POST` | `/api/rss` | RSS URL を追加（JSON ボディ: `{ url }`）|
+| `DELETE` | `/api/rss` | RSS URL を削除（JSON ボディ: `{ url }`）|
 | `GET` | `/api/push/subscriptions` | Push 購読一覧を JSON で返す（endpoint のみ、keys は含まない）|
 | `POST` | `/api/push/subscribe` | Push 購読を保存（JSON ボディ: PushSubscription オブジェクト）|
 | `POST` | `/api/push/unsubscribe` | Push 購読を削除（JSON ボディ: `{ endpoint }`）|
@@ -179,23 +182,23 @@ Web Push 通知では以下のアイコンが使用されます。
 
 | 変数名 | 必須 | デフォルト | 説明 |
 |--------|------|-----------|------|
-| `RSS_URLS` | ✅ | — | 監視する RSS フィード URL（カンマ区切り） |
-| `DISCORD_WEBHOOK_URL` | ✅ | — | Discord Webhook URL |
+| `RSS_URLS` | | — | 監視する RSS フィード URL（カンマ区切り）。`RSS_URLS_FILE` が存在しない場合の初期値として使用される |
 | `VAPID_PUBLIC_KEY` | | — | Web Push 用 VAPID 公開鍵（Push 通知を使う場合は必須） |
 | `VAPID_PRIVATE_KEY` | | — | Web Push 用 VAPID 秘密鍵（Push 通知を使う場合は必須） |
 | `VAPID_SUBJECT` | | — | VAPID 送信元識別子（例: `mailto:you@example.com`）|
 | `STATE_FILE` | | `/data/state.json` | 通知済み ID の保存先パス |
 | `HISTORY_FILE` | | `/data/history.json` | 通知履歴の保存先パス |
 | `SUBSCRIPTIONS_FILE` | | `/data/subscriptions.json` | Push 購読情報の保存先パス |
+| `RSS_URLS_FILE` | | `/data/rss-urls.json` | 監視 RSS URL リストの保存先パス |
 | `GUI_PORT` | | `3334` | Web GUI のリッスンポート |
 
 ## セキュリティ
 
-> ⚠️ **重要**: `DISCORD_WEBHOOK_URL` や `VAPID_PRIVATE_KEY` を誤ってコミットした場合は、**それぞれの秘密情報を即座に無効化・再発行**してください。
+> ⚠️ **重要**: `VAPID_PRIVATE_KEY` を誤ってコミットした場合は、**即座に無効化・再発行**してください。
 
 - `.env` は絶対にコミットしないでください（`.gitignore` で除外済み）
 - 自宅サーバ上で `.env` のパーミッションを制限することを推奨します: `chmod 600 .env`
-- `data/` ディレクトリ（状態ファイル・履歴ファイル・購読ファイル）も `.gitignore` で除外されています
+- `data/` ディレクトリ（状態ファイル・履歴ファイル・購読ファイル・RSS URL ファイル）も `.gitignore` で除外されています
 - 管理画面は認証なしで公開されます。自宅 LAN 内や VPN 越しに限定した利用を推奨します
 - `/api/push/send` は認証不要のため、公開環境では Cloudflare Access 等で保護してください
 
@@ -226,13 +229,14 @@ Android Chrome では設定 → サイト設定 → 通知 から該当サイト
 
 ```
 .
-├── index.js            # RSS チェック & Discord 通知スクリプト（cron から実行）
-├── lib.js              # 共通ユーティリティ（Discord 送信・履歴 I/O など）
+├── index.js            # RSS チェック & Web Push 通知スクリプト（cron から実行）
+├── lib.js              # 共通ユーティリティ（履歴 I/O・RSS URL 管理など）
 ├── push.js             # Web Push ユーティリティ（VAPID・購読管理・送信）
 ├── server.js           # Web GUI サーバ（Express、ポート 3334）
 ├── public/
 │   ├── sw.js           # Service Worker（push イベント処理・通知アクション）
 │   ├── push-client.js  # ブラウザ側 Push 購読スクリプト
+│   ├── rss-client.js   # ブラウザ側 RSS フィード管理スクリプト
 │   └── icons/
 │       ├── news-192.png  # 通知アイコン（192×192）
 │       └── badge-72.png  # バッジアイコン（72×72）
@@ -247,5 +251,6 @@ Android Chrome では設定 → サイト設定 → 通知 から該当サイト
 └── data/               # 永続化ディレクトリ（コミット禁止）
     ├── state.json      # 通知済み ID
     ├── history.json    # 通知履歴（最大 200 件）
-    └── subscriptions.json  # Web Push 購読情報
+    ├── subscriptions.json  # Web Push 購読情報
+    └── rss-urls.json   # 監視 RSS URL リスト
 ```
