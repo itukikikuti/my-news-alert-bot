@@ -97,7 +97,7 @@ function renderPage(history, showSuccess, errorMessage) {
 <body>
   <h1>🔔 News Alert Bot 管理画面</h1>
 
-  <h2>テスト通知送信</h2>
+  <h2>Discord テスト通知送信</h2>
   ${feedback}
   <form method="POST" action="/api/test-discord">
     <input type="text" name="title" placeholder="通知タイトル" required maxlength="200" value="テスト通知">
@@ -109,8 +109,9 @@ function renderPage(history, showSuccess, errorMessage) {
   <div id="push-status" class="feedback"></div>
   <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
     <button id="push-subscribe-btn" type="button">Push通知を購読する</button>
+    <button id="push-send-test-btn" type="button" class="secondary">Web Push をテスト送信</button>
   </div>
-  <p style="font-size:0.85rem;color:#666;margin-top:0.5rem;">Android Chrome でこのページを開き、「Push通知を購読する」をタップしてください。</p>
+  <p style="font-size:0.85rem;color:#666;margin-top:0.5rem;">Android Chrome でこのページを開き、「Push通知を購読する」で購読後、「Web Push をテスト送信」で配信確認できます。</p>
 
   <h2>通知履歴（直近 ${history.length} 件）</h2>
   ${

@@ -8,6 +8,7 @@
 
   const statusEl = document.getElementById("push-status");
   const subscribeBtn = document.getElementById("push-subscribe-btn");
+  const sendTestBtn = document.getElementById("push-send-test-btn");
 
   function setStatus(msg, isError) {
     if (!statusEl) return;
@@ -99,6 +100,55 @@
     }
   }
 
+  async function sendTestPush() {
+    if (!vapidPublicKey) {
+      setStatus("❌ VAPIDキーが設定されていないため、Web Push を送信できません。", true);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/push/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "テスト通知",
+          body: "Web Push 動作確認",
+          url: "/",
+        }),
+      });
+
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus("❌ Web Push のテスト送信に失敗しました: " + (result.error || res.status), true);
+        return;
+      }
+
+      const hasCounts =
+        typeof result.sent === "number" &&
+        typeof result.failed === "number" &&
+        typeof result.removed === "number";
+
+      if (!hasCounts) {
+        setStatus("✅ Web Push のテスト送信リクエストを受け付けました。", false);
+        return;
+      }
+
+      if (result.sent === 0 && result.failed === 0 && result.removed === 0) {
+        setStatus("❌ 送信先の Push 購読がありません。先に「Push通知を購読する」を実行してください。", true);
+        return;
+      }
+
+      if (result.sent > 0) {
+        setStatus(`✅ Web Push をテスト送信しました（成功: ${result.sent}件 / 失敗: ${result.failed}件 / 削除: ${result.removed}件）`, false);
+        return;
+      }
+
+      setStatus(`❌ Web Push のテスト送信に失敗しました（失敗: ${result.failed}件 / 削除: ${result.removed}件）`, true);
+    } catch (err) {
+      setStatus("❌ Web Push のテスト送信でエラーが発生しました: " + err.message, true);
+    }
+  }
+
   async function checkSubscriptionState() {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
     try {
@@ -125,6 +175,12 @@
         } else {
           subscribeToPush();
         }
+      });
+    }
+
+    if (sendTestBtn) {
+      sendTestBtn.addEventListener("click", () => {
+        sendTestPush();
       });
     }
   });
