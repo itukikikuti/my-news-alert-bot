@@ -11,13 +11,23 @@ self.addEventListener("push", (event) => {
   }
 
   const title = payload.title || "News Alert";
+  const url = payload.url || "/";
+
   const options = {
     body: payload.body || "",
-    icon: payload.icon || "/favicon.ico",
-    badge: payload.badge || "/favicon.ico",
+    icon: payload.icon || "/icons/news-192.png",
+    badge: payload.badge || "/icons/badge-72.png",
     tag: payload.tag || "news-alert",
-    data: { url: payload.url || "/" },
+    data: { url },
   };
+
+  // Add an "Open article" action button where supported (e.g. Android Chrome).
+  // Browsers that don't support actions will silently ignore this field.
+  if (url && url !== "/") {
+    options.actions = [
+      { action: "open_url", title: "記事を開く" },
+    ];
+  }
 
   event.waitUntil(self.registration.showNotification(title, options));
 });
@@ -25,6 +35,7 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
+  // Both action button click and direct notification tap open the target URL.
   const url = event.notification.data?.url || "/";
 
   event.waitUntil(
