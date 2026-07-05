@@ -7,6 +7,16 @@ export const HISTORY_FILE =
   process.env.HISTORY_FILE ||
   path.join(path.dirname(STATE_FILE), "history.json");
 
+function getStateFile() {
+  return process.env.STATE_FILE || "/data/state.json";
+}
+
+function getHistoryFile() {
+  if (process.env.HISTORY_FILE) return process.env.HISTORY_FILE;
+  const stateFile = getStateFile();
+  return path.join(path.dirname(stateFile), "history.json");
+}
+
 const HISTORY_MAX = 200;
 const SUMMARY_MAX_LENGTH = 120;
 const MAX_UNICODE_CODE_POINT = 0x10ffff;
@@ -72,6 +82,25 @@ function truncateText(text, maxLength) {
   return `${text.slice(0, Math.max(0, maxLength - ELLIPSIS_LENGTH)).trimEnd()}…`;
 }
 
+/**
+ * Derive a stable deduplication key for an RSS/Atom feed item.
+ * Priority:
+ *   1. entry.id / guid  (most stable Atom identifier)
+ *   2. canonical target URL (Google redirect unwrapped)
+ *   3. normalized title + published timestamp
+ */
+export function deriveEntryKey(item) {
+  const id = (item?.id || item?.guid || "").trim();
+  if (id) return `id:${id}`;
+
+  const link = extractOriginalUrl(item?.link || "");
+  if (link) return `url:${link}`;
+
+  const title = cleanText(item?.title || "");
+  const pub = (item?.isoDate || item?.pubDate || item?.published || item?.updated || "").trim();
+  return `title:${title}|pub:${pub}`;
+}
+
 export function extractOriginalUrl(rawLink) {
   const link = String(rawLink ?? "").trim();
   if (!link) return "";
@@ -131,8 +160,9 @@ export function buildNotificationMessage({ title, summary, publishedAt, link }) 
 }
 
 export async function loadState() {
+  const stateFile = getStateFile();
   try {
-    const raw = await fs.readFile(STATE_FILE, "utf-8");
+    const raw = await fs.readFile(stateFile, "utf-8");
     return JSON.parse(raw);
   } catch (e) {
     if (e.code !== "ENOENT") {
@@ -143,13 +173,15 @@ export async function loadState() {
 }
 
 export async function saveState(state) {
-  await fs.mkdir(path.dirname(STATE_FILE), { recursive: true });
-  await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
+  const stateFile = getStateFile();
+  await fs.mkdir(path.dirname(stateFile), { recursive: true });
+  await fs.writeFile(stateFile, JSON.stringify(state, null, 2), "utf-8");
 }
 
 export async function loadHistory() {
+  const historyFile = getHistoryFile();
   try {
-    const raw = await fs.readFile(HISTORY_FILE, "utf-8");
+    const raw = await fs.readFile(historyFile, "utf-8");
     return JSON.parse(raw);
   } catch (e) {
     if (e.code !== "ENOENT") {
@@ -160,8 +192,9 @@ export async function loadHistory() {
 }
 
 export async function saveHistory(history) {
-  await fs.mkdir(path.dirname(HISTORY_FILE), { recursive: true });
-  await fs.writeFile(HISTORY_FILE, JSON.stringify(history, null, 2), "utf-8");
+  const historyFile = getHistoryFile();
+  await fs.mkdir(path.dirname(historyFile), { recursive: true });
+  await fs.writeFile(historyFile, JSON.stringify(history, null, 2), "utf-8");
 }
 
 export async function recordNotification(entry) {
