@@ -1,27 +1,22 @@
 import Parser from "rss-parser";
 import {
-  DISCORD_WEBHOOK_URL,
   cleanText,
   extractOriginalUrl,
   loadState,
   saveState,
-  sendToDiscord,
+  loadRSSUrls,
   recordNotification,
 } from "./lib.js";
 import { sendPushNotifications } from "./push.js";
 
 const parser = new Parser();
 
-const RSS_URLS = process.env.RSS_URLS?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
-
-if (!DISCORD_WEBHOOK_URL) {
-  throw new Error("DISCORD_WEBHOOK_URL is not set");
-}
-if (RSS_URLS.length === 0) {
-  throw new Error("RSS_URLS is not set");
-}
-
 async function checkAndNotify() {
+  const RSS_URLS = await loadRSSUrls();
+  if (RSS_URLS.length === 0) {
+    throw new Error("No RSS URLs configured. Add URLs via the admin UI or set RSS_URLS env var as fallback.");
+  }
+
   const state = await loadState();
 
   for (const url of RSS_URLS) {
@@ -34,11 +29,9 @@ async function checkAndNotify() {
       const title = cleanText(latest.title) || "(no title)";
       const link = extractOriginalUrl(latest.link);
       const summary = latest.contentSnippet || latest.summary || latest.content || "";
-      const publishedAt = latest.published || latest.pubDate || latest.isoDate || latest.updated;
 
       const lastId = state[url];
       if (entryId && entryId !== lastId) {
-        await sendToDiscord(title, link, { summary, publishedAt });
         await sendPushNotifications({ title, body: summary ? cleanText(summary).slice(0, 120) : undefined, url: link }).catch((e) => {
           console.error("[PUSH] Failed to send push notifications:", e);
         });

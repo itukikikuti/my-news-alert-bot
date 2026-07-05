@@ -2,10 +2,10 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import {
-  DISCORD_WEBHOOK_URL,
   loadHistory,
-  sendToDiscord,
-  recordNotification,
+  loadRSSUrls,
+  addRSSUrl,
+  removeRSSUrl,
 } from "./lib.js";
 import {
   VAPID_PUBLIC_KEY,
@@ -18,11 +18,6 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.GUI_PORT || "3334", 10);
-
-if (!DISCORD_WEBHOOK_URL) {
-  console.error("[ERROR] DISCORD_WEBHOOK_URL is not set");
-  process.exit(1);
-}
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -37,7 +32,7 @@ function htmlEscape(str) {
     .replace(/"/g, "&quot;");
 }
 
-function renderPage(history, showSuccess, errorMessage) {
+function renderPage(history, pushFeedback) {
   const rows = history
     .map(
       (entry) => `
@@ -52,12 +47,6 @@ function renderPage(history, showSuccess, errorMessage) {
     </tr>`
     )
     .join("");
-
-  const feedback = showSuccess
-    ? `<div class="feedback success">✅ テスト通知を Discord に送信しました</div>`
-    : errorMessage
-    ? `<div class="feedback error">❌ エラー: ${htmlEscape(errorMessage)}</div>`
-    : "";
 
   const vapidKeyScript = VAPID_PUBLIC_KEY
     ? `<script>window.VAPID_PUBLIC_KEY = ${JSON.stringify(VAPID_PUBLIC_KEY)};</script>`
@@ -79,8 +68,6 @@ function renderPage(history, showSuccess, errorMessage) {
     .error   { background: #f8d7da; color: #721c24; }
     form { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
     input[type="text"], input[type="url"] { padding: 0.45rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95rem; }
-    input[name="title"] { width: 240px; }
-    input[name="link"]  { width: 320px; }
     textarea { padding: 0.45rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95rem; width: 100%; resize: vertical; }
     button { padding: 0.45rem 1rem; background: #0070f3; color: #fff; border: none; border-radius: 4px; font-size: 0.95rem; cursor: pointer; white-space: nowrap; }
     button:hover { background: #0051a8; }
@@ -98,24 +85,28 @@ function renderPage(history, showSuccess, errorMessage) {
     #push-status { display: none; margin: 1rem 0; }
     #push-test-status { display: none; margin: 1rem 0; }
     #sub-list-status { display: none; margin: 1rem 0; }
+    #rss-status { display: none; margin: 1rem 0; }
     .push-test-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 560px; }
     .push-test-form .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
     .push-test-form label { font-size: 0.9rem; min-width: 60px; }
     #sub-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.85rem; }
     #sub-table th, #sub-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #e0e0e0; vertical-align: middle; }
     #sub-table th { background: #f5f5f5; }
+    #rss-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.85rem; }
+    #rss-table th, #rss-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #e0e0e0; vertical-align: middle; }
+    #rss-table th { background: #f5f5f5; }
   </style>
 </head>
 <body>
   <h1>🔔 News Alert Bot 管理画面</h1>
 
-  <h2>Discord テスト通知送信</h2>
-  ${feedback}
-  <form method="POST" action="/api/test-discord">
-    <input type="text" name="title" placeholder="通知タイトル" required maxlength="200" value="テスト通知">
-    <input type="url" name="link" placeholder="URL（省略可）" maxlength="2000">
-    <button type="submit">Discord へ送信</button>
-  </form>
+  <h2>📡 RSS フィード管理</h2>
+  <div id="rss-status" class="feedback"></div>
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+    <input type="url" id="rss-add-input" placeholder="RSS フィード URL (https://...)" maxlength="2000" style="flex:1;min-width:200px;">
+    <button id="rss-add-btn" type="button">追加</button>
+  </div>
+  <div id="rss-list-container" style="margin-top:0.5rem;"><p class="empty">読み込み中...</p></div>
 
   <h2>🔔 Web Push 購読</h2>
   <div id="push-status" class="feedback"></div>
@@ -162,6 +153,7 @@ function renderPage(history, showSuccess, errorMessage) {
   }
   ${vapidKeyScript}
   <script src="/push-client.js"></script>
+  <script src="/rss-client.js"></script>
 </body>
 </html>`;
 }
@@ -169,11 +161,7 @@ function renderPage(history, showSuccess, errorMessage) {
 app.get("/", async (req, res) => {
   try {
     const history = await loadHistory();
-    const html = renderPage(
-      history,
-      req.query.status === "ok",
-      req.query.error ? decodeURIComponent(req.query.error) : null
-    );
+    const html = renderPage(history);
     res.set("Content-Type", "text/html; charset=utf-8").send(html);
   } catch (e) {
     console.error("[ERROR] Failed to render admin page:", e);
@@ -191,21 +179,44 @@ app.get("/api/history", async (req, res) => {
   }
 });
 
-app.post("/api/test-discord", async (req, res) => {
-  const title = String(req.body?.title ?? "").trim().slice(0, 200) || "テスト通知";
-  const link = String(req.body?.link ?? "").trim().slice(0, 2000);
+// ---------------------------------------------------------------------------
+// RSS URL management API
+// ---------------------------------------------------------------------------
 
+app.get("/api/rss", async (req, res) => {
   try {
-    await sendToDiscord(title, link);
-    await recordNotification({
-      title,
-      link: link || null,
-      feedUrl: null,
-      sentAt: new Date().toISOString(),
-    });
-    res.redirect("/?status=ok");
+    const urls = await loadRSSUrls();
+    res.json(urls);
   } catch (e) {
-    res.redirect(`/?error=${encodeURIComponent(e.message)}`);
+    console.error("[ERROR] Failed to load RSS URLs:", e);
+    res.status(500).json({ error: "Failed to load RSS URLs" });
+  }
+});
+
+app.post("/api/rss", async (req, res) => {
+  const url = String(req.body?.url ?? "").trim();
+  if (!url) {
+    return res.status(400).json({ error: "url is required" });
+  }
+  try {
+    const urls = await addRSSUrl(url);
+    res.json({ ok: true, urls });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete("/api/rss", async (req, res) => {
+  const url = String(req.body?.url ?? "").trim();
+  if (!url) {
+    return res.status(400).json({ error: "url is required" });
+  }
+  try {
+    const urls = await removeRSSUrl(url);
+    res.json({ ok: true, urls });
+  } catch (e) {
+    console.error("[ERROR] Failed to remove RSS URL:", e);
+    res.status(500).json({ error: e.message });
   }
 });
 

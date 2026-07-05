@@ -111,7 +111,11 @@ export async function sendPushNotifications(payload) {
     return { sent: 0, failed: 0, removed: 0 };
   }
 
-  const data = JSON.stringify(payload);
+  const data = JSON.stringify({
+    icon: "/icons/news-192.png",
+    badge: "/icons/badge-72.png",
+    ...payload,
+  });
   let sent = 0;
   let failed = 0;
   let removed = 0;
