@@ -2,10 +2,6 @@ import fs from "fs/promises";
 import path from "path";
 
 export const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
-export const STATE_FILE = process.env.STATE_FILE || "/data/state.json";
-export const HISTORY_FILE =
-  process.env.HISTORY_FILE ||
-  path.join(path.dirname(STATE_FILE), "history.json");
 
 function getStateFile() {
   return process.env.STATE_FILE || "/data/state.json";
@@ -13,8 +9,7 @@ function getStateFile() {
 
 function getHistoryFile() {
   if (process.env.HISTORY_FILE) return process.env.HISTORY_FILE;
-  const stateFile = getStateFile();
-  return path.join(path.dirname(stateFile), "history.json");
+  return path.join(path.dirname(getStateFile()), "history.json");
 }
 
 const HISTORY_MAX = 200;
