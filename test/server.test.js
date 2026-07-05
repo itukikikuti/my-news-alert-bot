@@ -96,9 +96,9 @@ test("GET /api/push/subscriptions returns list of endpoints after subscribe", as
     assert.equal(res.status, 200);
     const data = await res.json();
     assert.equal(data.length, 2);
-    // Only endpoint should be returned (keys omitted)
+    // Only endpoint should be returned (keys must not be present)
     assert.ok(data.every((s) => typeof s.endpoint === "string"));
-    assert.ok(data.every((s) => !s.keys));
+    assert.ok(data.every((s) => !("keys" in s)));
   } finally {
     await killServer(child);
     await fs.rm(tmpDir, { recursive: true, force: true });

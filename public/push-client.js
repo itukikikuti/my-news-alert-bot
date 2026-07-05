@@ -218,29 +218,48 @@
         return;
       }
 
-      const tableRows = list
-        .map((sub, i) => {
-          const ep = sub.endpoint || "";
-          const short = ep.length > 64 ? ep.slice(0, 32) + "…" + ep.slice(-20) : ep;
-          return `<tr>
-            <td>${i + 1}</td>
-            <td><code title="${ep}">${short}</code></td>
-            <td><button class="danger" data-endpoint="${ep}" onclick="window.__removeSubscription(this.dataset.endpoint)">削除</button></td>
-          </tr>`;
-        })
-        .join("");
+      // Build table using DOM APIs to avoid XSS from endpoint values
+      const table = document.createElement("table");
+      table.id = "sub-table";
+      const thead = table.createTHead();
+      const headerRow = thead.insertRow();
+      ["#", "エンドポイント", "操作"].forEach((text) => {
+        const th = document.createElement("th");
+        th.textContent = text;
+        headerRow.appendChild(th);
+      });
+      const tbody = table.createTBody();
 
-      subListContainer.innerHTML = `<table id="sub-table">
-        <thead><tr><th>#</th><th>エンドポイント</th><th>操作</th></tr></thead>
-        <tbody>${tableRows}</tbody>
-      </table>`;
+      list.forEach((sub, i) => {
+        const ep = sub.endpoint || "";
+        const short = ep.length > 64 ? ep.slice(0, 32) + "…" + ep.slice(-20) : ep;
+
+        const row = tbody.insertRow();
+        row.insertCell().textContent = String(i + 1);
+
+        const epCell = row.insertCell();
+        const code = document.createElement("code");
+        code.title = ep;
+        code.textContent = short;
+        epCell.appendChild(code);
+
+        const btnCell = row.insertCell();
+        const btn = document.createElement("button");
+        btn.className = "danger";
+        btn.textContent = "削除";
+        btn.addEventListener("click", () => removeSubscriptionByEndpoint(ep));
+        btnCell.appendChild(btn);
+      });
+
+      subListContainer.replaceChildren(table);
     } catch (err) {
-      subListContainer.innerHTML = `<p class="empty">読み込みに失敗しました: ${err.message}</p>`;
+      subListContainer.innerHTML = "";
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "読み込みに失敗しました: " + err.message;
+      subListContainer.appendChild(p);
     }
   }
-
-  // Expose remove handler for inline onclick
-  window.__removeSubscription = removeSubscriptionByEndpoint;
 
   async function checkSubscriptionState() {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
