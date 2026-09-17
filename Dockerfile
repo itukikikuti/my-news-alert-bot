@@ -1,10 +1,10 @@
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY index.js lib.js discord.js server.js ./
+COPY index.js lib.js discord.js article.js server.js ./
 COPY public ./public
 
 # Install dcron for cron scheduling

@@ -7,7 +7,9 @@
     "start": "node index.js"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "express": "^5.2.1",
+    "jsdom": "^30.1.0",
     "rss-parser": "^3.13.0"
   }
 }

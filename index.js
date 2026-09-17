@@ -9,6 +9,7 @@ import {
   recordNotification,
 } from "./lib.js";
 import { sendDiscordNotification } from "./discord.js";
+import { fetchArticleText } from "./article.js";
 
 const parser = new Parser();
 
@@ -58,9 +59,17 @@ async function checkAndNotify() {
         const summary = item.contentSnippet || item.summary || item.content || "";
         const publishedAt = item.isoDate || item.pubDate || item.published || item.updated || null;
 
+        // Prefer the full article body; fall back to title+link only when the
+        // page cannot be fetched or no article text is extracted.
+        const articleText = link ? await fetchArticleText(link) : null;
+        const body = articleText || undefined;
+        if (!articleText) {
+          console.warn(`[ARTICLE] Falling back to title+link for ${link || title}`);
+        }
+
         await sendDiscordNotification({
           title,
-          body: summary ? cleanText(summary).slice(0, 300) : undefined,
+          body,
           url: link,
         }).catch((e) => {
           console.error("[DISCORD] Failed to send notification:", e);

@@ -6,8 +6,13 @@ function getWebhookUrl() {
   return process.env.DISCORD_WEBHOOK_URL || "";
 }
 
-// Truncate to keep within Discord embed limits (description max 4096 chars,
-// title max 256). We keep things far below the limits anyway.
+// Discord embed description limit is 4096 characters, but multibyte text
+// (e.g. Japanese) hits the webhook's byte-based limit earlier: empirical
+// testing shows ~3350 Japanese chars is the practical ceiling, so we cap at
+// 3000 for headroom (title/URL/JSON escaping). The embed URL still links to
+// the full article.
+const DESCRIPTION_MAX = 3000;
+
 function truncate(text, max) {
   if (!text) return "";
   return text.length > max ? text.slice(0, max - 1) + "…" : text;
@@ -22,7 +27,7 @@ export async function sendDiscordNotification({ title, body, url }) {
   const embed = {
     title: truncate(title, 250),
     url: url || undefined,
-    description: truncate(body, 300) || undefined,
+    description: truncate(body, DESCRIPTION_MAX) || undefined,
     color: 0x5865f2, // Discord blurple
     timestamp: new Date().toISOString(),
   };
