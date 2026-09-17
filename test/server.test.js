@@ -36,7 +36,6 @@ function spawnServer(extraEnv = {}) {
       GUI_PORT: SERVER_PORT,
       STATE_FILE: `${TMP_DIR}/state.json`,
       HISTORY_FILE: `${TMP_DIR}/history.json`,
-      SUBSCRIPTIONS_FILE: `${TMP_DIR}/subscriptions.json`,
       RSS_URLS_FILE: `${TMP_DIR}/rss-urls.json`,
       ...extraEnv,
     },
@@ -49,7 +48,7 @@ async function killServer(child) {
   await new Promise((resolve) => child.once("exit", resolve));
 }
 
-test("admin page displays RSS management, Web Push test form, and subscription management", async () => {
+test("admin page displays RSS management and Discord test form", async () => {
   const child = spawnServer();
   try {
     const html = await waitForServerReady();
@@ -57,56 +56,48 @@ test("admin page displays RSS management, Web Push test form, and subscription m
     assert.match(html, /id="rss-add-input"/);
     assert.match(html, /id="rss-add-btn"/);
     assert.match(html, /id="rss-list-container"/);
-    assert.match(html, /id="push-send-test-btn"/);
-    assert.match(html, /Web Push をテスト送信/);
-    assert.match(html, /id="push-test-title"/);
-    assert.match(html, /id="push-test-body"/);
-    assert.match(html, /id="push-test-url"/);
-    assert.match(html, /購読管理/);
-    assert.match(html, /id="sub-reload-btn"/);
-    assert.match(html, /id="sub-list-container"/);
-    // Discord section must not appear
-    assert.doesNotMatch(html, /Discord/);
+    assert.match(html, /Discord テスト送信/);
+    assert.match(html, /id="discord-send-test-btn"/);
+    assert.match(html, /id="discord-test-title"/);
+    assert.match(html, /id="discord-test-body"/);
+    assert.match(html, /id="discord-test-url"/);
+    // Web Push UI must not appear
+    assert.doesNotMatch(html, /Web Push/);
+    assert.doesNotMatch(html, /push-subscribe-btn/);
   } finally {
     await killServer(child);
   }
 });
 
-test("GET /api/push/subscriptions returns empty array when no subscriptions", async () => {
-  const child = spawnServer();
+test("POST /api/discord/send returns 503 when webhook is not configured", async () => {
+  const child = spawnServer({ DISCORD_WEBHOOK_URL: "" });
   try {
     await waitForServerReady();
-    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/push/subscriptions`);
-    assert.equal(res.status, 200);
+    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/discord/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "テスト" }),
+    });
+    assert.equal(res.status, 503);
     const data = await res.json();
-    assert.deepEqual(data, []);
+    assert.ok(data.error);
   } finally {
     await killServer(child);
   }
 });
 
-test("GET /api/push/subscriptions returns list of endpoints after subscribe", async () => {
-  const tmpDir = path.join(os.tmpdir(), "my-news-alert-bot-server-test-subs");
-  await fs.mkdir(tmpDir, { recursive: true });
-  const subsFile = path.join(tmpDir, "subscriptions.json");
-  await fs.writeFile(subsFile, JSON.stringify([
-    { endpoint: "https://fcm.googleapis.com/push/test1", keys: { p256dh: "k1", auth: "a1" } },
-    { endpoint: "https://fcm.googleapis.com/push/test2", keys: { p256dh: "k2", auth: "a2" } },
-  ]));
-
-  const child = spawnServer({ SUBSCRIPTIONS_FILE: subsFile });
+test("POST /api/discord/send requires a title", async () => {
+  const child = spawnServer({ DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/x/y" });
   try {
     await waitForServerReady();
-    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/push/subscriptions`);
-    assert.equal(res.status, 200);
-    const data = await res.json();
-    assert.equal(data.length, 2);
-    // Only endpoint should be returned (keys must not be present)
-    assert.ok(data.every((s) => typeof s.endpoint === "string"));
-    assert.ok(data.every((s) => !("keys" in s)));
+    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/discord/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400);
   } finally {
     await killServer(child);
-    await fs.rm(tmpDir, { recursive: true, force: true });
   }
 });
 

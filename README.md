@@ -1,24 +1,20 @@
 # my-news-alert-bot
 
-RSS フィードを定期チェックして、新着記事を Web Push で通知する自己ホスト型ボットです。  
-Docker Compose で簡単に自宅サーバへデプロイできます。  
-**Web Push（Android Chrome 対応）** に対応しており、ブラウザから直接プッシュ通知を受け取れます。
+RSS フィードを定期チェックして、新着記事を Discord に通知する自己ホスト型ボットです。  
+Docker Compose で簡単に自宅サーバへデプロイできます。
 
 ## 機能
 
 - 複数の RSS フィードを 1 分ごとにポーリング
-- 新着エントリが見つかったときだけ **Web Push 通知**を送信
-  - タイトル・本文・通知アイコン・バッジアイコンを表示
-  - 対応ブラウザでは「記事を開く」アクションボタンを表示、非対応時は通知タップで記事を開く
+- 新着エントリが見つかったときだけ **Discord Webhook で通知**を送信
+  - タイトル・抜粋・記事URL を embed 形式で表示
 - 通知時にタイトル/本文の HTML タグ・HTML エンティティを整形し、読みやすい形式で表示
 - Google Alerts のリダイレクト URL は可能な限り元記事 URL を優先
 - 通知済み ID を `/data/state.json` に保存し、再起動後に重複通知しない
 - フィード単位でエラーハンドリング（1 件失敗しても他フィードは継続）
 - **Web GUI 管理画面**（ポート 3334）で以下が可能：
   - **RSS フィード管理** — 監視対象 URL の一覧・追加・削除
-  - Web Push テスト送信（任意のタイトル・本文・URL を指定可能）
-  - Web Push 購読 / 解除
-  - Push 購読管理（一覧表示・個別削除）
+  - Discord テスト送信（任意のタイトル・本文・URL を指定可能）
   - 通知履歴の確認
 
 ## セットアップ
@@ -67,9 +63,7 @@ http://localhost:3334
 
 - **RSS フィード管理** — 監視対象 URL の一覧表示・追加・削除（`/data/rss-urls.json` に永続化）
 - **通知履歴の確認** — 過去に送信した通知のタイトル・リンク・送信時刻・フィード URL を一覧で確認できます（最大 200 件）
-- **Web Push テスト送信** — タイトル・本文・URL を自由に指定して Push 通知を送信し、動作確認できます
-- **Web Push 購読 / 解除** — 「Push通知を購読する」で Android Chrome からプッシュ通知を受け取れます
-- **購読管理** — サーバーに登録されている Push 購読の一覧を確認し、個別に削除できます
+- **Discord テスト送信** — タイトル・本文・URL を自由に指定して Discord 通知を送信し、動作確認できます
 
 ### 4. ログを確認する
 
@@ -89,80 +83,21 @@ docker compose exec news-bot tail -f /var/log/cron.log
 docker compose down
 ```
 
-## Web Push セットアップ
+## Discord セットアップ
 
-### VAPID キーの生成
+通知には Discord の Incoming Webhook を使用します。
 
-Web Push には VAPID（Voluntary Application Server Identification）キーが必要です。  
-以下のいずれかの方法で生成してください。
-
-**方法 A: npx を使う（推奨）**
-
-```bash
-npx web-push generate-vapid-keys
-```
-
-**方法 B: Node.js スクリプトで生成**
-
-```bash
-node -e "
-import('web-push').then(wp => {
-  const k = wp.default.generateVAPIDKeys();
-  console.log('VAPID_PUBLIC_KEY=' + k.publicKey);
-  console.log('VAPID_PRIVATE_KEY=' + k.privateKey);
-});
-"
-```
-
-生成された値を `.env` に追加してください。
+1. Discord で通知を送りたいチャンネルの「チャンネル設定」→「連携サービス」→「ウェブフック」→「新しいウェブフック」
+2. ウェブフックの URL をコピー
+3. `.env` に追加:
 
 ```env
-VAPID_PUBLIC_KEY=BExamplePublicKey...
-VAPID_PRIVATE_KEY=ExamplePrivateKey...
-VAPID_SUBJECT=mailto:you@example.com
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxxxx/yyyyy
 ```
 
-> ⚠️ `VAPID_PRIVATE_KEY` は絶対にコミットしないでください。
+> ⚠️ Webhook URL はトークンを含むため、絶対にコミットしないでください。
 
-### Cloudflare Tunnel での利用
-
-Web Push は HTTPS が必要です。Cloudflare Tunnel を使用している場合、  
-サイトは既に `https://` 配信されているため、追加設定は不要です。
-
-1. Cloudflare Tunnel で `https://your-domain.example.com` → `localhost:3334` を設定済みであること
-2. Android Chrome で `https://your-domain.example.com` にアクセス
-3. 管理画面の「Push通知を購読する」をタップ → 通知を許可
-4. 購読が完了したら `/api/push/send` または RSS アラート経由で通知が届きます
-
-### Android でのテスト手順
-
-1. Cloudflare Tunnel 経由で HTTPS にアクセスできる状態にする
-2. Android Chrome で `https://your-domain.example.com` を開く
-3. 「Push通知を購読する」ボタンをタップ
-4. 「通知を許可」をタップ
-5. 「✅ Push通知の購読が完了しました！」と表示されれば成功
-6. 「🧪 Web Push テスト送信」セクションのフォームでタイトル・本文・URL を入力し「Web Push をテスト送信」をタップ
-7. Android の通知バーにプッシュ通知が届いていることを確認
-8. 対応ブラウザ（Android Chrome 等）では通知に「記事を開く」ボタンが表示され、タップすると記事 URL が開きます
-
-### 購読管理
-
-「📋 購読管理」セクションでサーバーに登録されている Push 購読の一覧を確認できます。
-
-- 「購読一覧を更新」ボタンで最新の購読一覧を取得します
-- 各購読の「削除」ボタンをクリックすると、その購読をサーバーから削除できます
-- API で操作する場合は `GET /api/push/subscriptions` で一覧取得、`POST /api/push/unsubscribe` で削除できます
-
-### 通知アイコン
-
-Web Push 通知では以下のアイコンが使用されます。
-
-| ファイル | サイズ | 用途 |
-|---------|-------|------|
-| `public/icons/news-192.png` | 192×192 px | 通知アイコン（`icon`） |
-| `public/icons/badge-72.png` | 72×72 px | バッジアイコン（`badge`、Android ステータスバー用） |
-
-`/api/push/send` の `icon` / `badge` フィールドで別の画像 URL を指定することも可能です。
+4. 管理画面の「🧪 Discord テスト送信」フォームで動作確認できます
 
 ## API エンドポイント
 
@@ -173,73 +108,50 @@ Web Push 通知では以下のアイコンが使用されます。
 | `GET` | `/api/rss` | 監視中の RSS URL 一覧を JSON で返す |
 | `POST` | `/api/rss` | RSS URL を追加（JSON ボディ: `{ url }`）|
 | `DELETE` | `/api/rss` | RSS URL を削除（JSON ボディ: `{ url }`）|
-| `GET` | `/api/push/subscriptions` | Push 購読一覧を JSON で返す（endpoint のみ、keys は含まない）|
-| `POST` | `/api/push/subscribe` | Push 購読を保存（JSON ボディ: PushSubscription オブジェクト）|
-| `POST` | `/api/push/unsubscribe` | Push 購読を削除（JSON ボディ: `{ endpoint }`）|
-| `POST` | `/api/push/send` | Push 通知を全購読者へ送信（JSON ボディ: `{ title, body?, url?, icon?, badge?, tag? }`）|
+| `POST` | `/api/discord/send` | Discord にテスト通知を送信（JSON ボディ: `{ title, body?, url? }`）|
 
 ## 環境変数
 
 | 変数名 | 必須 | デフォルト | 説明 |
 |--------|------|-----------|------|
 | `RSS_URLS` | | — | 監視する RSS フィード URL（カンマ区切り）。`RSS_URLS_FILE` が存在しない場合の初期値として使用される |
-| `VAPID_PUBLIC_KEY` | | — | Web Push 用 VAPID 公開鍵（Push 通知を使う場合は必須） |
-| `VAPID_PRIVATE_KEY` | | — | Web Push 用 VAPID 秘密鍵（Push 通知を使う場合は必須） |
-| `VAPID_SUBJECT` | | — | VAPID 送信元識別子（例: `mailto:you@example.com`）|
+| `DISCORD_WEBHOOK_URL` | ✅ | — | 通知先 Discord チャンネルの Webhook URL |
 | `STATE_FILE` | | `/data/state.json` | 通知済み ID の保存先パス |
 | `HISTORY_FILE` | | `/data/history.json` | 通知履歴の保存先パス |
-| `SUBSCRIPTIONS_FILE` | | `/data/subscriptions.json` | Push 購読情報の保存先パス |
 | `RSS_URLS_FILE` | | `/data/rss-urls.json` | 監視 RSS URL リストの保存先パス |
 | `GUI_PORT` | | `3334` | Web GUI のリッスンポート |
 
 ## セキュリティ
 
-> ⚠️ **重要**: `VAPID_PRIVATE_KEY` を誤ってコミットした場合は、**即座に無効化・再発行**してください。
+> ⚠️ **重要**: `DISCORD_WEBHOOK_URL` を誤ってコミットした場合は、**即座にウェブフックを削除・再作成**してください。
 
 - `.env` は絶対にコミットしないでください（`.gitignore` で除外済み）
 - 自宅サーバ上で `.env` のパーミッションを制限することを推奨します: `chmod 600 .env`
-- `data/` ディレクトリ（状態ファイル・履歴ファイル・購読ファイル・RSS URL ファイル）も `.gitignore` で除外されています
+- `data/` ディレクトリ（状態ファイル・履歴ファイル・RSS URL ファイル）も `.gitignore` で除外されています
 - 管理画面は認証なしで公開されます。自宅 LAN 内や VPN 越しに限定した利用を推奨します
-- `/api/push/send` は認証不要のため、公開環境では Cloudflare Access 等で保護してください
+- `/api/discord/send` は認証不要のため、公開環境では Cloudflare Access 等で保護してください
 
-## トラブルシューティング（Web Push）
+## トラブルシューティング
 
-### 通知の許可を拒否してしまった
+### Discord に通知が届かない
 
-ブラウザのアドレスバー左の鍵アイコン → 「通知」→ 「許可」に変更してください。  
-Android Chrome では設定 → サイト設定 → 通知 から該当サイトを許可できます。
-
-### 購読が失効した / 通知が届かない
-
-購読は端末やブラウザのデータ削除、OS の通知設定変更などで失効します。  
-サーバーは送信失敗時（HTTP 404/410）に購読を自動で削除します。  
-再度「Push通知を購読する」ボタンをタップして再登録してください。
-
-### VAPID キーが設定されていない
-
-サーバーログに `[PUSH] VAPID keys are not fully configured` と表示されます。  
-`.env` に `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`、`VAPID_SUBJECT` を設定してください。
-
-### Service Worker が登録されない
-
-- サイトが `https://` または `localhost` で配信されていることを確認してください
-- `sw.js` がサーバーのルートから `/sw.js` でアクセスできることを確認してください
+- コンテナのログに `[DISCORD] Failed to send notification` が出ていないか確認してください
+- `DISCORD_WEBHOOK_URL` が正しく設定されているか確認してください（Webhook URL を再コピー）
+- Discord 側でウェブフックが削除されていないか確認してください
+- 管理画面の「🧪 Discord テスト送信」で疎通確認できます
 
 ## ディレクトリ構成
 
 ```
 .
-├── index.js            # RSS チェック & Web Push 通知スクリプト（cron から実行）
+├── index.js            # RSS チェック & Discord 通知スクリプト（cron から実行）
 ├── lib.js              # 共通ユーティリティ（履歴 I/O・RSS URL 管理など）
-├── push.js             # Web Push ユーティリティ（VAPID・購読管理・送信）
+├── discord.js          # Discord Webhook 送信ユーティリティ
 ├── server.js           # Web GUI サーバ（Express、ポート 3334）
 ├── public/
-│   ├── sw.js           # Service Worker（push イベント処理・通知アクション）
-│   ├── push-client.js  # ブラウザ側 Push 購読スクリプト
-│   ├── rss-client.js   # ブラウザ側 RSS フィード管理スクリプト
-│   └── icons/
-│       ├── news-192.png  # 通知アイコン（192×192）
-│       └── badge-72.png  # バッジアイコン（72×72）
+│   ├── discord-client.js  # ブラウザ側 Discord テスト送信スクリプト
+│   ├── rss-client.js      # ブラウザ側 RSS フィード管理スクリプト
+│   └── icons/             # アイコン画像
 ├── entrypoint.sh       # Docker 起動スクリプト（crond + server.js）
 ├── package.json
 ├── package-lock.json
@@ -251,6 +163,5 @@ Android Chrome では設定 → サイト設定 → 通知 から該当サイト
 └── data/               # 永続化ディレクトリ（コミット禁止）
     ├── state.json      # 通知済み ID
     ├── history.json    # 通知履歴（最大 200 件）
-    ├── subscriptions.json  # Web Push 購読情報
     └── rss-urls.json   # 監視 RSS URL リスト
 ```

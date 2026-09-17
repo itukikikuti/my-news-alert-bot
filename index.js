@@ -8,7 +8,7 @@ import {
   loadRSSUrls,
   recordNotification,
 } from "./lib.js";
-import { sendPushNotifications } from "./push.js";
+import { sendDiscordNotification } from "./discord.js";
 
 const parser = new Parser();
 
@@ -58,12 +58,12 @@ async function checkAndNotify() {
         const summary = item.contentSnippet || item.summary || item.content || "";
         const publishedAt = item.isoDate || item.pubDate || item.published || item.updated || null;
 
-        await sendPushNotifications({
+        await sendDiscordNotification({
           title,
-          body: summary ? cleanText(summary).slice(0, 120) : undefined,
+          body: summary ? cleanText(summary).slice(0, 300) : undefined,
           url: link,
         }).catch((e) => {
-          console.error("[PUSH] Failed to send push notifications:", e);
+          console.error("[DISCORD] Failed to send notification:", e);
         });
         await recordNotification({
           title,

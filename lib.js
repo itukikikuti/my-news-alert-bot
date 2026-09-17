@@ -7,7 +7,7 @@ export const HISTORY_FILE =
   path.join(path.dirname(STATE_FILE), "history.json");
 
 // Dynamic getters allow tests to override STATE_FILE / HISTORY_FILE env vars
-// at call-time, matching the pattern used in push.js for SUBSCRIPTIONS_FILE.
+// at call-time.
 function getStateFile() {
   return process.env.STATE_FILE || "/data/state.json";
 }
