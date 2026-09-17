@@ -25,12 +25,28 @@ function htmlEscape(str) {
     .replace(/"/g, "&quot;");
 }
 
+// Format an ISO timestamp for display in Asia/Tokyo (JST).
+function formatJst(isoString) {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return isoString ?? "";
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 function renderPage(history) {
   const rows = history
     .map(
       (entry) => `
     <tr>
-      <td>${htmlEscape(entry.sentAt)}</td>
+      <td>${htmlEscape(formatJst(entry.sentAt))}</td>
       <td>${
         entry.link
           ? `<a href="${htmlEscape(entry.link)}" target="_blank" rel="noopener noreferrer">${htmlEscape(entry.title)}</a>`
@@ -118,7 +134,7 @@ function renderPage(history) {
       ? '<p class="empty">まだ通知はありません。</p>'
       : `<table>
     <thead>
-      <tr><th>送信時刻 (UTC)</th><th>タイトル / リンク</th><th>フィード / 種別</th></tr>
+      <tr><th>送信時刻 (JST)</th><th>タイトル / リンク</th><th>フィード / 種別</th></tr>
     </thead>
     <tbody>${rows}</tbody>
   </table>`
