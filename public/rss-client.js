@@ -26,19 +26,22 @@
         return;
       }
 
-      // Build table using DOM APIs to avoid XSS from URL values
+      // Build table using DOM APIs to avoid XSS from feed values
       const table = document.createElement("table");
       table.id = "rss-table";
       const thead = table.createTHead();
       const headerRow = thead.insertRow();
-      ["#", "RSS フィード URL", "操作"].forEach((text) => {
+      ["#", "RSS フィード URL", "通知プロンプト (AI判定)", "操作"].forEach((text) => {
         const th = document.createElement("th");
         th.textContent = text;
         headerRow.appendChild(th);
       });
       const tbody = table.createTBody();
 
-      list.forEach((url, i) => {
+      list.forEach((feed, i) => {
+        const url = typeof feed === "string" ? feed : feed.url;
+        const prompt = typeof feed === "string" ? "" : feed.prompt || "";
+
         const row = tbody.insertRow();
         row.insertCell().textContent = String(i + 1);
 
@@ -46,6 +49,24 @@
         const code = document.createElement("code");
         code.textContent = url;
         urlCell.appendChild(code);
+
+        // Per-feed AI prompt: textarea + save button
+        const promptCell = row.insertCell();
+        const promptBox = document.createElement("div");
+        promptBox.className = "prompt-box";
+        const textarea = document.createElement("textarea");
+        textarea.rows = 2;
+        textarea.maxLength = 2000;
+        textarea.placeholder = "例: 広島カープのチケット販売情報以外は通知しないでください";
+        textarea.value = prompt;
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "secondary";
+        saveBtn.textContent = "保存";
+        saveBtn.addEventListener("click", () => savePrompt(url, textarea.value, saveBtn));
+        promptBox.appendChild(textarea);
+        promptBox.appendChild(saveBtn);
+        promptCell.appendChild(promptBox);
 
         const btnCell = row.insertCell();
         const btn = document.createElement("button");
@@ -111,6 +132,27 @@
       loadRSSList();
     } catch (err) {
       setRSSStatus("❌ 削除でエラーが発生しました: " + err.message, true);
+    }
+  }
+
+  async function savePrompt(url, prompt, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch("/api/rss/prompt", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, prompt }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRSSStatus("❌ プロンプトの保存に失敗しました: " + (result.error || res.status), true);
+        return;
+      }
+      setRSSStatus("✅ プロンプトを保存しました。", false);
+    } catch (err) {
+      setRSSStatus("❌ 保存でエラーが発生しました: " + err.message, true);
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 

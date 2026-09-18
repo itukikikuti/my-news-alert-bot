@@ -114,7 +114,7 @@ test("GET /api/rss returns empty array when no RSS URLs configured", async () =>
   }
 });
 
-test("POST /api/rss adds a URL and GET returns it", async () => {
+test("POST /api/rss adds a URL and GET returns it as a feed object", async () => {
   const tmpDir = path.join(os.tmpdir(), "my-news-alert-bot-server-test-rss");
   await fs.mkdir(tmpDir, { recursive: true });
   const rssFile = path.join(tmpDir, "rss-urls.json");
@@ -132,11 +132,62 @@ test("POST /api/rss adds a URL and GET returns it", async () => {
     assert.equal(addData.ok, true);
 
     const getRes = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/rss`);
-    const urls = await getRes.json();
-    assert.ok(urls.includes("https://example.com/feed.xml"));
+    const feeds = await getRes.json();
+    assert.ok(feeds.some((f) => f.url === "https://example.com/feed.xml"));
+    assert.equal(feeds.find((f) => f.url === "https://example.com/feed.xml").prompt, "");
   } finally {
     await killServer(child);
     await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("PUT /api/rss/prompt saves a per-feed prompt", async () => {
+  const tmpDir = path.join(os.tmpdir(), "my-news-alert-bot-server-test-rss-prompt");
+  await fs.mkdir(tmpDir, { recursive: true });
+  const rssFile = path.join(tmpDir, "rss-urls.json");
+
+  const child = spawnServer({ RSS_URLS_FILE: rssFile });
+  try {
+    await waitForServerReady();
+    await fetch(`http://127.0.0.1:${SERVER_PORT}/api/rss`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://example.com/feed.xml" }),
+    });
+    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/rss/prompt`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: "https://example.com/feed.xml",
+        prompt: "カープのチケット販売情報以外は通知しないでください",
+      }),
+    });
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.ok, true);
+
+    const getRes = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/rss`);
+    const feeds = await getRes.json();
+    const feed = feeds.find((f) => f.url === "https://example.com/feed.xml");
+    assert.equal(feed.prompt, "カープのチケット販売情報以外は通知しないでください");
+  } finally {
+    await killServer(child);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("PUT /api/rss/prompt rejects an unknown URL", async () => {
+  const child = spawnServer();
+  try {
+    await waitForServerReady();
+    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/rss/prompt`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://unknown.example.com/feed", prompt: "x" }),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await killServer(child);
   }
 });
 
@@ -160,9 +211,9 @@ test("DELETE /api/rss removes a URL", async () => {
     assert.equal(delRes.status, 200);
 
     const getRes = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/rss`);
-    const urls = await getRes.json();
-    assert.equal(urls.length, 1);
-    assert.equal(urls[0], "https://example.com/feed2.xml");
+    const feeds = await getRes.json();
+    assert.equal(feeds.length, 1);
+    assert.equal(feeds[0].url, "https://example.com/feed2.xml");
   } finally {
     await killServer(child);
     await fs.rm(tmpDir, { recursive: true, force: true });

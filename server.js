@@ -3,11 +3,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 import {
   loadHistory,
-  loadRSSUrls,
+  loadRSSFeeds,
   addRSSUrl,
   removeRSSUrl,
+  setFeedPrompt,
 } from "./lib.js";
 import { sendDiscordNotification } from "./discord.js";
+import { isAiFilterEnabled } from "./ai-filter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.GUI_PORT || "3334", 10);
@@ -42,6 +44,7 @@ function formatJst(isoString) {
 }
 
 function renderPage(history) {
+  const aiFilterEnabled = isAiFilterEnabled();
   const rows = history
     .map(
       (entry) => `
@@ -95,10 +98,14 @@ function renderPage(history) {
     #sub-table, #rss-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.85rem; }
     th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #e0e0e0; vertical-align: middle; }
     th { background: #f5f5f5; }
+    .prompt-box { display: flex; flex-direction: column; gap: 0.35rem; min-width: 240px; }
+    .prompt-box textarea { font-size: 0.82rem; }
+    .prompt-box button { align-self: flex-end; padding: 0.3rem 0.8rem; font-size: 0.82rem; }
   </style>
 </head>
 <body>
   <h1>🔔 News Alert Bot 管理画面</h1>
+  <p style="font-size:0.85rem;color:#666;">AI判定: ${aiFilterEnabled ? "<strong style='color:#155724;'>有効</strong>" : "<strong style='color:#721c24;'>無効（OLLAMA_API_KEY 未設定）</strong>"} — 各フィードの「通知プロンプト」に従って通知可否を判定します。</p>
 
   <h2>📡 RSS フィード管理</h2>
   <div id="rss-status" class="feedback"></div>
@@ -172,8 +179,8 @@ app.get("/api/history", async (req, res) => {
 
 app.get("/api/rss", async (req, res) => {
   try {
-    const urls = await loadRSSUrls();
-    res.json(urls);
+    const feeds = await loadRSSFeeds();
+    res.json(feeds);
   } catch (e) {
     console.error("[ERROR] Failed to load RSS URLs:", e);
     res.status(500).json({ error: "Failed to load RSS URLs" });
@@ -186,8 +193,8 @@ app.post("/api/rss", async (req, res) => {
     return res.status(400).json({ error: "url is required" });
   }
   try {
-    const urls = await addRSSUrl(url);
-    res.json({ ok: true, urls });
+    const feeds = await addRSSUrl(url);
+    res.json({ ok: true, feeds });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -199,11 +206,29 @@ app.delete("/api/rss", async (req, res) => {
     return res.status(400).json({ error: "url is required" });
   }
   try {
-    const urls = await removeRSSUrl(url);
-    res.json({ ok: true, urls });
+    const feeds = await removeRSSUrl(url);
+    res.json({ ok: true, feeds });
   } catch (e) {
     console.error("[ERROR] Failed to remove RSS URL:", e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Update the per-feed AI prompt (used to decide whether to notify).
+app.put("/api/rss/prompt", async (req, res) => {
+  const url = String(req.body?.url ?? "").trim();
+  if (!url) {
+    return res.status(400).json({ error: "url is required" });
+  }
+  const prompt = String(req.body?.prompt ?? "");
+  if (prompt.length > 2000) {
+    return res.status(400).json({ error: "prompt is too long (max 2000 chars)" });
+  }
+  try {
+    const feeds = await setFeedPrompt(url, prompt);
+    res.json({ ok: true, feeds });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 

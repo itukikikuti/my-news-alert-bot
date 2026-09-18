@@ -11,9 +11,12 @@ import {
   isValidRSSUrl,
   loadHistory,
   loadRSSUrls,
+  loadRSSFeeds,
   loadState,
   addRSSUrl,
   removeRSSUrl,
+  saveRSSFeeds,
+  setFeedPrompt,
   recordNotification,
   saveHistory,
   saveState,
@@ -300,5 +303,67 @@ test("loadRSSUrls falls back to RSS_URLS env var when file does not exist", asyn
     } finally {
       delete process.env.RSS_URLS;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-feed prompts (loadRSSFeeds / setFeedPrompt)
+// ---------------------------------------------------------------------------
+
+test("loadRSSFeeds returns an empty array when nothing is configured", async () => {
+  await withTempRSSFile(async () => {
+    assert.deepEqual(await loadRSSFeeds(), []);
+  });
+});
+
+test("addRSSUrl stores feeds with an empty prompt", async () => {
+  await withTempRSSFile(async () => {
+    await addRSSUrl("https://feeds.example.com/news");
+    const feeds = await loadRSSFeeds();
+    assert.deepEqual(feeds, [{ url: "https://feeds.example.com/news", prompt: "" }]);
+  });
+});
+
+test("setFeedPrompt saves and returns the updated prompt", async () => {
+  await withTempRSSFile(async () => {
+    await addRSSUrl("https://feeds.example.com/carp");
+    const rule = "広島カープのチケット販売情報以外は通知しないでください";
+    const feeds = await setFeedPrompt("https://feeds.example.com/carp", rule);
+    assert.equal(feeds[0].prompt, rule);
+    assert.equal((await loadRSSFeeds())[0].prompt, rule);
+  });
+});
+
+test("setFeedPrompt rejects an unknown URL", async () => {
+  await withTempRSSFile(async () => {
+    await assert.rejects(
+      () => setFeedPrompt("https://unknown.example.com/feed", "x"),
+      /not found/
+    );
+  });
+});
+
+test("loadRSSFeeds migrates the legacy string-array format", async () => {
+  await withTempRSSFile(async (tmpFile) => {
+    await fs.writeFile(tmpFile, JSON.stringify([
+      "https://legacy.example.com/feed1",
+      "https://legacy.example.com/feed2",
+    ]));
+    assert.deepEqual(await loadRSSFeeds(), [
+      { url: "https://legacy.example.com/feed1", prompt: "" },
+      { url: "https://legacy.example.com/feed2", prompt: "" },
+    ]);
+  });
+});
+
+test("saveRSSFeeds round-trips feed objects with prompts", async () => {
+  await withTempRSSFile(async () => {
+    await saveRSSFeeds([
+      { url: "https://a.example.com/feed", prompt: "Aだけ通知" },
+      { url: "https://b.example.com/feed", prompt: "" },
+    ]);
+    const feeds = await loadRSSFeeds();
+    assert.equal(feeds[0].prompt, "Aだけ通知");
+    assert.equal(feeds[1].prompt, "");
   });
 });

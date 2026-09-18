@@ -182,12 +182,33 @@ function getRSSUrlsFile() {
 }
 
 export async function loadRSSUrls() {
+  return (await loadRSSFeeds()).map((f) => f.url);
+}
+
+/**
+ * Load configured RSS feeds as objects: { url, prompt }.
+ * Backward compatible with the legacy format (plain array of URL strings).
+ */
+export async function loadRSSFeeds() {
   const file = getRSSUrlsFile();
   try {
     const raw = await fs.readFile(file, "utf-8");
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed.filter((u) => typeof u === "string" && u.trim());
+      return parsed
+        .map((entry) => {
+          if (typeof entry === "string") {
+            return { url: entry.trim(), prompt: "" };
+          }
+          if (entry && typeof entry.url === "string" && entry.url.trim()) {
+            return {
+              url: entry.url.trim(),
+              prompt: typeof entry.prompt === "string" ? entry.prompt : "",
+            };
+          }
+          return null;
+        })
+        .filter(Boolean);
     }
   } catch (e) {
     if (e.code !== "ENOENT") {
@@ -195,13 +216,38 @@ export async function loadRSSUrls() {
     }
   }
   // Fall back to environment variable
-  return process.env.RSS_URLS?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+  return (
+    process.env.RSS_URLS?.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((url) => ({ url, prompt: "" })) ?? []
+  );
 }
 
 export async function saveRSSUrls(urls) {
   const file = getRSSUrlsFile();
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(urls, null, 2), "utf-8");
+}
+
+/** Save feed objects ({ url, prompt }) to disk. */
+export async function saveRSSFeeds(feeds) {
+  const file = getRSSUrlsFile();
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(feeds, null, 2), "utf-8");
+}
+
+/** Update the per-feed AI prompt. Returns the updated feed list. */
+export async function setFeedPrompt(url, prompt) {
+  const trimmed = String(url ?? "").trim();
+  const feeds = await loadRSSFeeds();
+  const idx = feeds.findIndex((f) => f.url === trimmed);
+  if (idx < 0) {
+    throw new Error("URL not found");
+  }
+  feeds[idx] = { ...feeds[idx], prompt: String(prompt ?? "") };
+  await saveRSSFeeds(feeds);
+  return feeds;
 }
 
 export function isValidRSSUrl(url) {
@@ -214,19 +260,19 @@ export async function addRSSUrl(url) {
   if (!isValidRSSUrl(trimmed)) {
     throw new Error("Invalid URL: must start with http:// or https://");
   }
-  const urls = await loadRSSUrls();
-  if (urls.includes(trimmed)) {
+  const feeds = await loadRSSFeeds();
+  if (feeds.some((f) => f.url === trimmed)) {
     throw new Error("URL already exists");
   }
-  urls.push(trimmed);
-  await saveRSSUrls(urls);
-  return urls;
+  feeds.push({ url: trimmed, prompt: "" });
+  await saveRSSFeeds(feeds);
+  return feeds;
 }
 
 export async function removeRSSUrl(url) {
   const trimmed = String(url ?? "").trim();
-  const urls = await loadRSSUrls();
-  const filtered = urls.filter((u) => u !== trimmed);
-  await saveRSSUrls(filtered);
+  const feeds = await loadRSSFeeds();
+  const filtered = feeds.filter((f) => f.url !== trimmed);
+  await saveRSSFeeds(filtered);
   return filtered;
 }

@@ -5,11 +5,13 @@ import {
   deriveEntryKey,
   loadState,
   saveState,
-  loadRSSUrls,
+  loadRSSFeeds,
+  loadHistory,
   recordNotification,
 } from "./lib.js";
 import { sendDiscordNotification } from "./discord.js";
 import { fetchArticleText } from "./article.js";
+import { shouldNotify } from "./ai-filter.js";
 
 const parser = new Parser();
 
@@ -17,14 +19,18 @@ const parser = new Parser();
 const MAX_SEEN_KEYS = 500;
 
 async function checkAndNotify() {
-  const RSS_URLS = await loadRSSUrls();
-  if (RSS_URLS.length === 0) {
+  const FEEDS = await loadRSSFeeds();
+  if (FEEDS.length === 0) {
     throw new Error("No RSS URLs configured. Add URLs via the admin UI or set RSS_URLS env var as fallback.");
   }
 
   const state = await loadState();
+  // Recent notifications, used by the AI filter for duplicate detection.
+  const history = await loadHistory();
 
-  for (const url of RSS_URLS) {
+  for (const feedConfig of FEEDS) {
+    const url = feedConfig.url;
+    const feedPrompt = feedConfig.prompt;
     try {
       const feed = await parser.parseURL(url);
       const items = feed.items ?? [];
@@ -67,6 +73,19 @@ async function checkAndNotify() {
           console.warn(`[ARTICLE] Falling back to title+link for ${link || title}`);
         }
 
+        // Ask the LLM whether this article should be notified at all.
+        // Fail-open: a disabled or failing filter still notifies.
+        const decision = await shouldNotify({
+          title,
+          body: articleText || undefined,
+          feedPrompt,
+          history,
+        });
+        if (!decision.notify) {
+          console.log(`[AI-SKIP] ${title} — ${decision.reason || ""}`);
+          continue;
+        }
+
         await sendDiscordNotification({
           title,
           body,
@@ -74,14 +93,18 @@ async function checkAndNotify() {
         }).catch((e) => {
           console.error("[DISCORD] Failed to send notification:", e);
         });
-        await recordNotification({
+        const notified = {
           title,
           link,
           feedUrl: url,
           entryKey,
           publishedAt,
           sentAt: new Date().toISOString(),
-        });
+        };
+        await recordNotification(notified);
+        // Keep the in-memory history current so later articles in this run
+        // can be deduplicated against it.
+        history.unshift(notified);
         notifiedCount++;
         console.log(`[NOTIFIED] ${title}`);
       }
