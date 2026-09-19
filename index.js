@@ -11,6 +11,7 @@ import {
 } from "./lib.js";
 import { sendDiscordNotification, sendDiscordDigest } from "./discord.js";
 import { sendNtfyNotification, isNtfyEnabled } from "./ntfy.js";
+import { sendFcmNotification, isFcmEnabled } from "./fcm.js";
 import { fetchArticleText } from "./article.js";
 import { shouldNotify } from "./ai-filter.js";
 
@@ -94,9 +95,22 @@ async function checkAndNotify() {
       // Send as ONE combined digest when several articles come in at once.
       // Android groups notifications per app/channel; a single message per run
       // is the reliable way to make sure the user actually sees them all.
-      // Send notifications. ntfy (if enabled) gets one message per article so
-      // Android shows separate notifications; Discord uses a single digest when
-      // several articles arrive at once (Android groups Discord notifications).
+      // Send notifications. FCM (if enabled) gets one message per article so
+      // the Android app shows separate notifications; ntfy likewise; Discord
+      // uses a single digest when several articles arrive at once (Android
+      // groups Discord notifications).
+      if (isFcmEnabled()) {
+        for (const a of toNotify) {
+          await sendFcmNotification({
+            title: a.title,
+            body: a.body,
+            url: a.url,
+          }).catch((e) => {
+            console.error("[FCM] Failed to send notification:", e);
+          });
+        }
+      }
+
       if (isNtfyEnabled()) {
         for (const a of toNotify) {
           await sendNtfyNotification({

@@ -107,6 +107,14 @@ function renderPage(history) {
   <h1>🔔 News Alert Bot 管理画面</h1>
   <p style="font-size:0.85rem;color:#666;">AI判定: ${aiFilterEnabled ? "<strong style='color:#155724;'>有効</strong>" : "<strong style='color:#721c24;'>無効（OLLAMA_API_KEY 未設定）</strong>"} — 各フィードの「通知プロンプト」に従って通知可否を判定します。</p>
 
+  <h2>📱 Android アプリ</h2>
+  <p style="font-size:0.9rem;">
+    <a href="/download/apk" style="display:inline-block;background:#0070f3;color:#fff;text-decoration:none;padding:0.6rem 1.2rem;border-radius:6px;font-weight:bold;">
+      ⬇️ News Alert アプリをダウンロード (APK)
+    </a>
+  </p>
+  <p style="font-size:0.8rem;color:#666;">ダウンロード後、ファイルアプリから APK を開いてインストールしてください（「提供元不明のアプリ」の許可が必要です）。</p>
+
   <h2>📡 RSS フィード管理</h2>
   <div id="rss-status" class="feedback"></div>
   <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
