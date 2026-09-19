@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY index.js lib.js discord.js article.js ai-filter.js server.js ./
+COPY index.js lib.js discord.js article.js ai-filter.js ntfy.js server.js ./
 COPY public ./public
 
 # Install dcron for cron scheduling

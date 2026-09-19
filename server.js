@@ -163,6 +163,17 @@ app.get("/", async (req, res) => {
   }
 });
 
+// Serve the Android APK for sideloading. The file is mounted at /apk.
+app.get("/download/apk", (req, res) => {
+  const apkPath = process.env.APK_PATH || "/apk/NewsAlert.apk";
+  res.download(apkPath, "NewsAlert.apk", (err) => {
+    if (err) {
+      console.error("[ERROR] Failed to serve APK:", err.message);
+      if (!res.headersSent) res.status(404).send("APK not found");
+    }
+  });
+});
+
 app.get("/api/history", async (req, res) => {
   try {
     const history = await loadHistory();

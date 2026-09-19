@@ -2,3 +2,8 @@
 data/
 node_modules/
 npm-debug.log*
+
+# Built Android artifacts (large binaries; rebuild from ~/news-alert-app source)
+apk/
+# ntfy server data (runtime cache)
+ntfy-data/

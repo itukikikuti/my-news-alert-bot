@@ -9,7 +9,8 @@ import {
   loadHistory,
   recordNotification,
 } from "./lib.js";
-import { sendDiscordNotification } from "./discord.js";
+import { sendDiscordNotification, sendDiscordDigest } from "./discord.js";
+import { sendNtfyNotification, isNtfyEnabled } from "./ntfy.js";
 import { fetchArticleText } from "./article.js";
 import { shouldNotify } from "./ai-filter.js";
 
@@ -50,8 +51,10 @@ async function checkAndNotify() {
       );
 
       // Process items oldest-first so notifications arrive in chronological order.
+      // Collect the articles to notify first, then send them serially with gaps
+      // so Discord does not collapse them into a single grouped message.
       const orderedItems = [...items].reverse();
-      let notifiedCount = 0;
+      const toNotify = [];
 
       for (const item of orderedItems) {
         const entryKey = deriveEntryKey(item);
@@ -68,7 +71,6 @@ async function checkAndNotify() {
         // Prefer the full article body; fall back to title+link only when the
         // page cannot be fetched or no article text is extracted.
         const articleText = link ? await fetchArticleText(link) : null;
-        const body = articleText || undefined;
         if (!articleText) {
           console.warn(`[ARTICLE] Falling back to title+link for ${link || title}`);
         }
@@ -86,28 +88,59 @@ async function checkAndNotify() {
           continue;
         }
 
+        toNotify.push({ title, body: articleText || undefined, url: link, entryKey, publishedAt });
+      }
+
+      // Send as ONE combined digest when several articles come in at once.
+      // Android groups notifications per app/channel; a single message per run
+      // is the reliable way to make sure the user actually sees them all.
+      // Send notifications. ntfy (if enabled) gets one message per article so
+      // Android shows separate notifications; Discord uses a single digest when
+      // several articles arrive at once (Android groups Discord notifications).
+      if (isNtfyEnabled()) {
+        for (const a of toNotify) {
+          await sendNtfyNotification({
+            title: a.title,
+            body: a.body,
+            url: a.url,
+            tags: ["newspaper"],
+          }).catch((e) => {
+            console.error("[NTFY] Failed to send notification:", e);
+          });
+        }
+      }
+
+      if (toNotify.length === 1) {
         await sendDiscordNotification({
-          title,
-          body,
-          url: link,
+          title: toNotify[0].title,
+          body: toNotify[0].body,
+          url: toNotify[0].url,
         }).catch((e) => {
           console.error("[DISCORD] Failed to send notification:", e);
         });
+      } else if (toNotify.length > 1) {
+        await sendDiscordDigest(toNotify).catch((e) => {
+          console.error("[DISCORD] Failed to send digest:", e);
+        });
+      }
+
+      for (const a of toNotify) {
         const notified = {
-          title,
-          link,
+          title: a.title,
+          link: a.url,
           feedUrl: url,
-          entryKey,
-          publishedAt,
+          entryKey: a.entryKey,
+          publishedAt: a.publishedAt,
           sentAt: new Date().toISOString(),
         };
         await recordNotification(notified);
         // Keep the in-memory history current so later articles in this run
         // can be deduplicated against it.
         history.unshift(notified);
-        notifiedCount++;
-        console.log(`[NOTIFIED] ${title}`);
+        console.log(`[NOTIFIED] ${a.title}`);
       }
+
+      const notifiedCount = toNotify.length;
 
       if (notifiedCount === 0) {
         console.log(`[SKIP] no new entries for ${url}`);
