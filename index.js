@@ -91,9 +91,15 @@ async function checkAndNotify() {
       }
 
       // Send notifications. FCM and ntfy each get one message per article so
-      // the Android app shows every article as its own notification.
+      // the Android app shows every article as its own notification. Space
+      // sends out with a short gap: notifications fired a few milliseconds
+      // apart get collapsed by Android into one, even with unique tags.
+      const SEND_GAP_MS = 1500;
+
       if (isFcmEnabled()) {
-        for (const a of toNotify) {
+        for (let i = 0; i < toNotify.length; i++) {
+          const a = toNotify[i];
+          if (i > 0) await new Promise((r) => setTimeout(r, SEND_GAP_MS));
           await sendFcmNotification({
             title: a.title,
             body: a.body,
@@ -105,7 +111,9 @@ async function checkAndNotify() {
       }
 
       if (isNtfyEnabled()) {
-        for (const a of toNotify) {
+        for (let i = 0; i < toNotify.length; i++) {
+          const a = toNotify[i];
+          if (i > 0) await new Promise((r) => setTimeout(r, SEND_GAP_MS));
           await sendNtfyNotification({
             title: a.title,
             body: a.body,

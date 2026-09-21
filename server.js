@@ -92,7 +92,6 @@ function renderPage(history) {
     /* Feed URLs are long and must not collapse into one character per line on
        narrow screens. Allow them to break at any character but keep them
        left-aligned and on a sane minimum width. */
-    #rss-table td:nth-child(2) { min-width: 12rem; }
     #rss-table td:nth-child(2) code {
       white-space: normal;
       overflow-wrap: anywhere;
@@ -105,12 +104,34 @@ function renderPage(history) {
     .test-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 560px; }
     .test-form .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
     .test-form label { font-size: 0.9rem; min-width: 60px; }
-    #sub-table, #rss-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.85rem; }
-    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #e0e0e0; vertical-align: middle; }
-    th { background: #f5f5f5; }
-    .prompt-box { display: flex; flex-direction: column; gap: 0.35rem; min-width: 240px; }
-    .prompt-box textarea { font-size: 0.82rem; }
+    #sub-table, #rss-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.85rem; table-layout: fixed; }
+    #rss-table th, #rss-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #e0e0e0; vertical-align: top; overflow-wrap: anywhere; }
+    #rss-table th { background: #f5f5f5; }
+    /* Column widths that fit a phone screen: the URL and prompt columns share
+       the remaining space instead of forcing horizontal scroll. */
+    #rss-table th:nth-child(1), #rss-table td:nth-child(1) { width: 2rem; }
+    #rss-table th:nth-child(2), #rss-table td:nth-child(2) { width: 38%; }
+    #rss-table th:nth-child(4), #rss-table td:nth-child(4) { width: 4rem; }
+    #rss-table td:nth-child(2) code {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-all;
+      display: inline;
+      text-align: left;
+    }
+    .prompt-box { display: flex; flex-direction: column; gap: 0.35rem; }
+    .prompt-box textarea { font-size: 0.82rem; width: 100%; box-sizing: border-box; }
     .prompt-box button { align-self: flex-end; padding: 0.3rem 0.8rem; font-size: 0.82rem; }
+    /* Narrow screens: stack each feed as a labelled block so nothing overflows. */
+    @media (max-width: 600px) {
+      #rss-table, #rss-table thead, #rss-table tbody, #rss-table tr, #rss-table th, #rss-table td { display: block; width: auto; }
+      #rss-table thead { display: none; }
+      #rss-table tr { border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 0.75rem; padding: 0.4rem 0.5rem; }
+      #rss-table td { border: none; padding: 0.25rem 0; }
+      #rss-table td:nth-child(1) { font-weight: 600; color: #666; width: auto; }
+      #rss-table td:nth-child(2) { min-width: 0; width: auto; }
+      #rss-table td:nth-child(4) { width: auto; text-align: right; }
+    }
   </style>
 </head>
 <body>
