@@ -100,13 +100,18 @@ async function checkAndNotify() {
         for (let i = 0; i < toNotify.length; i++) {
           const a = toNotify[i];
           if (i > 0) await new Promise((r) => setTimeout(r, SEND_GAP_MS));
-          await sendFcmNotification({
-            title: a.title,
-            body: a.body,
-            url: a.url,
-          }).catch((e) => {
+          try {
+            const r = await sendFcmNotification({
+              title: a.title,
+              body: a.body,
+              url: a.url,
+            });
+            if (r.failed > 0) {
+              console.error(`[FCM] delivery failed for: ${a.title}`);
+            }
+          } catch (e) {
             console.error("[FCM] Failed to send notification:", e);
-          });
+          }
         }
       }
 

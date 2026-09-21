@@ -99,6 +99,30 @@ async function getAccessToken() {
 }
 
 /**
+ * FCM rejects a message when the notification body exceeds 4KB. Japanese text
+ * is 3 bytes per character, so trim to a byte budget rather than a char count.
+ */
+const FCM_NOTIFICATION_BODY_MAX_BYTES = 4096;
+const FCM_NOTIFICATION_TITLE_MAX_BYTES = 1024;
+
+/** Truncate [text] so its UTF-8 encoding fits within [maxBytes]. */
+function truncateToBytes(text, maxBytes) {
+  if (!text) return "";
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+  const ellipsis = "…";
+  const budget = maxBytes - Buffer.byteLength(ellipsis, "utf8");
+  let out = "";
+  let used = 0;
+  for (const ch of text) {
+    const size = Buffer.byteLength(ch, "utf8");
+    if (used + size > budget) break;
+    out += ch;
+    used += size;
+  }
+  return out + ellipsis;
+}
+
+/**
  * Send one article notification to every configured device token.
  * @param {{ title: string, body?: string, url?: string }} article
  * @returns {Promise<{ sent: number, failed: number }>}
@@ -121,11 +145,14 @@ export async function sendFcmNotification({ title, body, url }) {
 
   for (const token of tokens) {
     // Each message is independent; no `collapse_key`/group so Android treats
-    // every article as its own notification.
+    // every article as its own notification. Trim both fields to FCM's limits
+    // so a long article body cannot cause the whole message to be rejected.
+    const safeTitle = truncateToBytes(title || "News Alert", FCM_NOTIFICATION_TITLE_MAX_BYTES);
+    const safeBody = truncateToBytes(body || "", FCM_NOTIFICATION_BODY_MAX_BYTES);
     const message = {
       message: {
         token,
-        notification: { title: title || "News Alert", body: body || "" },
+        notification: { title: safeTitle, body: safeBody },
         data: url ? { url } : {},
         android: {
           priority: "high",
@@ -151,7 +178,7 @@ export async function sendFcmNotification({ title, body, url }) {
       });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status} ${text.slice(0, 200)}`);
+        throw new Error(`HTTP ${res.status} ${text.slice(0, 300)}`);
       }
       sent++;
     } catch (e) {
