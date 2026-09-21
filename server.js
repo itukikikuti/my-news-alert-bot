@@ -195,11 +195,14 @@ function renderPage(history, feeds) {
       #rss-table, #rss-table thead, #rss-table tbody, #rss-table tr, #rss-table th, #rss-table td { display: block; width: auto; }
       #rss-table thead { display: none; }
       #rss-table tr { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 0.8rem; padding: 0.6rem 0.7rem; background: var(--panel-2); }
-      #rss-table td { border: none; padding: 0.2rem 0; }
+      #rss-table td { border: none; padding: 0.2rem 0; text-align: left; }
       #rss-table td:nth-child(1) { display: none; }
       #rss-table td:nth-child(4) { text-align: right; }
-      .col-time { width: auto; }
-      .log-table th:nth-child(1), .log-table td:nth-child(1) { display: none; }
+      #rss-table .feed-title-input { text-align: left; padding-left: 0.4rem; }
+      #rss-table .feed-url { padding-left: 0.4rem; text-align: left; }
+      /* Keep the send time visible on phones instead of hiding the column. */
+      .col-time { width: auto; display: block; margin-bottom: 0.15rem; }
+      .log-table th:nth-child(1), .log-table td:nth-child(1) { display: block; }
       .log-table th:nth-child(3), .log-table td:nth-child(3) { font-size: 0.8rem; color: var(--muted); }
     }
   </style>
