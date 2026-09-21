@@ -8,7 +8,7 @@ import {
   removeRSSUrl,
   setFeedPrompt,
 } from "./lib.js";
-import { sendDiscordNotification } from "./discord.js";
+import { sendNtfyNotification, isNtfyEnabled } from "./ntfy.js";
 import { isAiFilterEnabled } from "./ai-filter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -89,8 +89,18 @@ function renderPage(history) {
     tr:hover td { background: #fafafa; }
     a { color: #0070f3; word-break: break-all; }
     code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.82em; word-break: break-all; }
+    /* Feed URLs are long and must not collapse into one character per line on
+       narrow screens. Allow them to break at any character but keep them
+       left-aligned and on a sane minimum width. */
+    #rss-table td:nth-child(2) { min-width: 12rem; }
+    #rss-table td:nth-child(2) code {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-all;
+      display: inline;
+      text-align: left;
+    }
     .empty { color: #888; text-align: center; padding: 2rem; }
-    #discord-test-status { display: none; margin: 1rem 0; }
     #rss-status { display: none; margin: 1rem 0; }
     .test-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 560px; }
     .test-form .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
@@ -123,26 +133,6 @@ function renderPage(history) {
   </div>
   <div id="rss-list-container" style="margin-top:0.5rem;"><p class="empty">読み込み中...</p></div>
 
-  <h2>🧪 Discord テスト送信</h2>
-  <div id="discord-test-status" class="feedback"></div>
-  <div class="test-form">
-    <div class="row">
-      <label for="discord-test-title">タイトル</label>
-      <input type="text" id="discord-test-title" placeholder="通知タイトル" maxlength="200" value="テスト通知" style="flex:1;">
-    </div>
-    <div class="row" style="align-items:flex-start;">
-      <label for="discord-test-body" style="padding-top:0.4rem;">本文</label>
-      <textarea id="discord-test-body" rows="2" placeholder="通知本文（省略可）" maxlength="500" style="flex:1;">Discord 動作確認</textarea>
-    </div>
-    <div class="row">
-      <label for="discord-test-url">URL</label>
-      <input type="url" id="discord-test-url" placeholder="通知に添付するURL（省略可）" maxlength="2000" style="flex:1;">
-    </div>
-    <div class="row">
-      <button id="discord-send-test-btn" type="button" class="secondary">Discord にテスト送信</button>
-    </div>
-  </div>
-
   <h2>通知履歴（直近 ${history.length} 件）</h2>
   ${
     history.length === 0
@@ -154,7 +144,6 @@ function renderPage(history) {
     <tbody>${rows}</tbody>
   </table>`
   }
-  <script src="/discord-client.js"></script>
   <script src="/rss-client.js"></script>
 </body>
 </html>`;
@@ -252,25 +241,6 @@ app.put("/api/rss/prompt", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Discord test notification API
-// ---------------------------------------------------------------------------
-
-app.post("/api/discord/send", async (req, res) => {
-  const { title, body, url } = req.body ?? {};
-  if (!title) {
-    return res.status(400).json({ error: "title is required" });
-  }
-  if (!process.env.DISCORD_WEBHOOK_URL) {
-    return res.status(503).json({ error: "DISCORD_WEBHOOK_URL is not configured" });
-  }
-  try {
-    const result = await sendDiscordNotification({ title, body, url });
-    res.json({ ok: true, ...result });
-  } catch (e) {
-    console.error("[ERROR] Failed to send Discord notification:", e);
-    res.status(502).json({ error: "Failed to send Discord notification" });
-  }
-});
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`[SERVER] Admin GUI available at http://0.0.0.0:${PORT}`);

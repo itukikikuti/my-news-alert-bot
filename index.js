@@ -9,7 +9,6 @@ import {
   loadHistory,
   recordNotification,
 } from "./lib.js";
-import { sendDiscordNotification, sendDiscordDigest } from "./discord.js";
 import { sendNtfyNotification, isNtfyEnabled } from "./ntfy.js";
 import { sendFcmNotification, isFcmEnabled } from "./fcm.js";
 import { fetchArticleText } from "./article.js";
@@ -52,8 +51,7 @@ async function checkAndNotify() {
       );
 
       // Process items oldest-first so notifications arrive in chronological order.
-      // Collect the articles to notify first, then send them serially with gaps
-      // so Discord does not collapse them into a single grouped message.
+      // Collect the articles to notify first, then send them serially.
       const orderedItems = [...items].reverse();
       const toNotify = [];
 
@@ -92,13 +90,8 @@ async function checkAndNotify() {
         toNotify.push({ title, body: articleText || undefined, url: link, entryKey, publishedAt });
       }
 
-      // Send as ONE combined digest when several articles come in at once.
-      // Android groups notifications per app/channel; a single message per run
-      // is the reliable way to make sure the user actually sees them all.
-      // Send notifications. FCM (if enabled) gets one message per article so
-      // the Android app shows separate notifications; ntfy likewise; Discord
-      // uses a single digest when several articles arrive at once (Android
-      // groups Discord notifications).
+      // Send notifications. FCM and ntfy each get one message per article so
+      // the Android app shows every article as its own notification.
       if (isFcmEnabled()) {
         for (const a of toNotify) {
           await sendFcmNotification({
@@ -124,18 +117,8 @@ async function checkAndNotify() {
         }
       }
 
-      if (toNotify.length === 1) {
-        await sendDiscordNotification({
-          title: toNotify[0].title,
-          body: toNotify[0].body,
-          url: toNotify[0].url,
-        }).catch((e) => {
-          console.error("[DISCORD] Failed to send notification:", e);
-        });
-      } else if (toNotify.length > 1) {
-        await sendDiscordDigest(toNotify).catch((e) => {
-          console.error("[DISCORD] Failed to send digest:", e);
-        });
+      if (toNotify.length === 0) {
+        console.log(`[SKIP] no new entries for ${url}`);
       }
 
       for (const a of toNotify) {
@@ -152,12 +135,6 @@ async function checkAndNotify() {
         // can be deduplicated against it.
         history.unshift(notified);
         console.log(`[NOTIFIED] ${a.title}`);
-      }
-
-      const notifiedCount = toNotify.length;
-
-      if (notifiedCount === 0) {
-        console.log(`[SKIP] no new entries for ${url}`);
       }
 
       // Persist seen keys, keeping only the newest MAX_SEEN_KEYS entries.
