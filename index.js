@@ -9,7 +9,6 @@ import {
   loadHistory,
   recordNotification,
 } from "./lib.js";
-import { sendNtfyNotification, isNtfyEnabled } from "./ntfy.js";
 import { sendFcmNotification, isFcmEnabled } from "./fcm.js";
 import { fetchArticleText } from "./article.js";
 import { shouldNotify } from "./ai-filter.js";
@@ -90,10 +89,10 @@ async function checkAndNotify() {
         toNotify.push({ title, body: articleText || undefined, url: link, entryKey, publishedAt });
       }
 
-      // Send notifications. FCM and ntfy each get one message per article so
-      // the Android app shows every article as its own notification. Space
-      // sends out with a short gap: notifications fired a few milliseconds
-      // apart get collapsed by Android into one, even with unique tags.
+      // Send notifications. FCM gets one message per article so the Android app
+      // shows every article as its own notification. Space sends out with a
+      // short gap: notifications fired milliseconds apart get collapsed by
+      // Android into one, even with unique tags.
       const SEND_GAP_MS = 1500;
 
       if (isFcmEnabled()) {
@@ -113,25 +112,6 @@ async function checkAndNotify() {
             console.error("[FCM] Failed to send notification:", e);
           }
         }
-      }
-
-      if (isNtfyEnabled()) {
-        for (let i = 0; i < toNotify.length; i++) {
-          const a = toNotify[i];
-          if (i > 0) await new Promise((r) => setTimeout(r, SEND_GAP_MS));
-          await sendNtfyNotification({
-            title: a.title,
-            body: a.body,
-            url: a.url,
-            tags: ["newspaper"],
-          }).catch((e) => {
-            console.error("[NTFY] Failed to send notification:", e);
-          });
-        }
-      }
-
-      if (toNotify.length === 0) {
-        console.log(`[SKIP] no new entries for ${url}`);
       }
 
       for (const a of toNotify) {

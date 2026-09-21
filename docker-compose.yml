@@ -7,28 +7,9 @@ services:
       - .env
     environment:
       - STATE_FILE=/data/state.json
-      - NTFY_URL=http://ntfy:80
-      - NTFY_TOPIC=${NTFY_TOPIC}
-    depends_on:
-      - ntfy
     ports:
       - "${GUI_PORT:-3334}:${GUI_PORT:-3334}"
     volumes:
       - ./data:/data
       - ./apk:/apk:ro
       - ./secrets:/secrets:ro
-
-  ntfy:
-    image: binwiederhier/ntfy:latest
-    container_name: my-news-ntfy
-    restart: unless-stopped
-    command: serve
-    environment:
-      - TZ=Asia/Tokyo
-      - NTFY_BASE_URL=${NTFY_BASE_URL:-http://10.0.0.99:3335}
-      - NTFY_CACHE_FILE=/var/lib/ntfy/cache.db
-      - NTFY_CACHE_DURATION=720h
-    ports:
-      - "${NTFY_PORT:-3335}:80"
-    volumes:
-      - ./ntfy-data:/var/lib/ntfy

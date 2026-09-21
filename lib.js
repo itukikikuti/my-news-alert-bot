@@ -198,12 +198,13 @@ export async function loadRSSFeeds() {
       return parsed
         .map((entry) => {
           if (typeof entry === "string") {
-            return { url: entry.trim(), prompt: "" };
+            return { url: entry.trim(), prompt: "", title: "" };
           }
           if (entry && typeof entry.url === "string" && entry.url.trim()) {
             return {
               url: entry.url.trim(),
               prompt: typeof entry.prompt === "string" ? entry.prompt : "",
+              title: typeof entry.title === "string" ? entry.title : "",
             };
           }
           return null;
@@ -220,7 +221,7 @@ export async function loadRSSFeeds() {
     process.env.RSS_URLS?.split(",")
       .map((s) => s.trim())
       .filter(Boolean)
-      .map((url) => ({ url, prompt: "" })) ?? []
+      .map((url) => ({ url, prompt: "", title: "" })) ?? []
   );
 }
 
@@ -250,6 +251,19 @@ export async function setFeedPrompt(url, prompt) {
   return feeds;
 }
 
+/** Update the cached display title of a feed. Returns the updated feed list. */
+export async function setFeedTitle(url, title) {
+  const trimmed = String(url ?? "").trim();
+  const feeds = await loadRSSFeeds();
+  const idx = feeds.findIndex((f) => f.url === trimmed);
+  if (idx < 0) {
+    throw new Error("URL not found");
+  }
+  feeds[idx] = { ...feeds[idx], title: String(title ?? "") };
+  await saveRSSFeeds(feeds);
+  return feeds;
+}
+
 export function isValidRSSUrl(url) {
   if (typeof url !== "string") return false;
   return /^https?:\/\/.+/i.test(url.trim());
@@ -264,7 +278,7 @@ export async function addRSSUrl(url) {
   if (feeds.some((f) => f.url === trimmed)) {
     throw new Error("URL already exists");
   }
-  feeds.push({ url: trimmed, prompt: "" });
+  feeds.push({ url: trimmed, prompt: "", title: "" });
   await saveRSSFeeds(feeds);
   return feeds;
 }

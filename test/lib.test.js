@@ -17,6 +17,7 @@ import {
   removeRSSUrl,
   saveRSSFeeds,
   setFeedPrompt,
+  setFeedTitle,
   recordNotification,
   saveHistory,
   saveState,
@@ -320,7 +321,7 @@ test("addRSSUrl stores feeds with an empty prompt", async () => {
   await withTempRSSFile(async () => {
     await addRSSUrl("https://feeds.example.com/news");
     const feeds = await loadRSSFeeds();
-    assert.deepEqual(feeds, [{ url: "https://feeds.example.com/news", prompt: "" }]);
+    assert.deepEqual(feeds, [{ url: "https://feeds.example.com/news", prompt: "", title: "" }]);
   });
 });
 
@@ -350,9 +351,27 @@ test("loadRSSFeeds migrates the legacy string-array format", async () => {
       "https://legacy.example.com/feed2",
     ]));
     assert.deepEqual(await loadRSSFeeds(), [
-      { url: "https://legacy.example.com/feed1", prompt: "" },
-      { url: "https://legacy.example.com/feed2", prompt: "" },
+      { url: "https://legacy.example.com/feed1", prompt: "", title: "" },
+      { url: "https://legacy.example.com/feed2", prompt: "", title: "" },
     ]);
+  });
+});
+
+test("setFeedTitle saves and returns the updated title", async () => {
+  await withTempRSSFile(async () => {
+    await addRSSUrl("https://feeds.example.com/title");
+    const feeds = await setFeedTitle("https://feeds.example.com/title", "中国新聞");
+    assert.equal(feeds[0].title, "中国新聞");
+    assert.equal((await loadRSSFeeds())[0].title, "中国新聞");
+  });
+});
+
+test("setFeedTitle rejects an unknown URL", async () => {
+  await withTempRSSFile(async () => {
+    await assert.rejects(
+      () => setFeedTitle("https://unknown.example.com/feed", "x"),
+      /not found/
+    );
   });
 });
 

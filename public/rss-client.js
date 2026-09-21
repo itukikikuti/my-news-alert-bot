@@ -10,8 +10,7 @@
   function setRSSStatus(msg, isError) {
     if (!rssStatusEl) return;
     rssStatusEl.textContent = msg;
-    rssStatusEl.className = "feedback " + (isError ? "error" : "success");
-    rssStatusEl.style.display = "block";
+    rssStatusEl.className = "feedback show " + (isError ? "error" : "success");
   }
 
   async function loadRSSList() {
@@ -31,7 +30,7 @@
       table.id = "rss-table";
       const thead = table.createTHead();
       const headerRow = thead.insertRow();
-      ["#", "RSS フィード URL", "通知プロンプト (AI判定)", "操作"].forEach((text) => {
+      ["#", "フィード", "通知プロンプト (AI判定)", "操作"].forEach((text) => {
         const th = document.createElement("th");
         th.textContent = text;
         headerRow.appendChild(th);
@@ -41,14 +40,39 @@
       list.forEach((feed, i) => {
         const url = typeof feed === "string" ? feed : feed.url;
         const prompt = typeof feed === "string" ? "" : feed.prompt || "";
+        const title = typeof feed === "string" ? "" : feed.title || "";
 
         const row = tbody.insertRow();
         row.insertCell().textContent = String(i + 1);
 
-        const urlCell = row.insertCell();
-        const code = document.createElement("code");
-        code.textContent = url;
-        urlCell.appendChild(code);
+        // Feed cell: editable title + the underlying URL.
+        const feedCell = row.insertCell();
+        const box = document.createElement("div");
+        box.className = "feed-box";
+
+        const titleInput = document.createElement("input");
+        titleInput.type = "text";
+        titleInput.className = "feed-title-input";
+        titleInput.maxLength = 200;
+        titleInput.placeholder = "フィード名（表示用）";
+        titleInput.value = title;
+
+        const urlLine = document.createElement("span");
+        urlLine.className = "feed-url";
+        urlLine.textContent = url;
+
+        box.appendChild(titleInput);
+        box.appendChild(urlLine);
+        feedCell.appendChild(box);
+
+        // Save the title when focus leaves the field or Enter is pressed.
+        titleInput.addEventListener("blur", () => saveTitle(url, titleInput.value));
+        titleInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            titleInput.blur();
+          }
+        });
 
         // Per-feed AI prompt: textarea + save button
         const promptCell = row.insertCell();
@@ -89,11 +113,11 @@
   async function addRSSUrl() {
     const url = (rssAddInput?.value || "").trim();
     if (!url) {
-      setRSSStatus("❌ URL を入力してください。", true);
+      setRSSStatus("URL を入力してください。", true);
       return;
     }
     if (!/^https?:\/\//i.test(url)) {
-      setRSSStatus("❌ URL は http:// または https:// で始めてください。", true);
+      setRSSStatus("URL は http:// または https:// で始めてください。", true);
       return;
     }
 
@@ -105,14 +129,14 @@
       });
       const result = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setRSSStatus("❌ 追加に失敗しました: " + (result.error || res.status), true);
+        setRSSStatus("追加に失敗しました: " + (result.error || res.status), true);
         return;
       }
-      setRSSStatus("✅ RSS フィードを追加しました。", false);
+      setRSSStatus("RSS フィードを追加しました。", false);
       if (rssAddInput) rssAddInput.value = "";
       loadRSSList();
     } catch (err) {
-      setRSSStatus("❌ エラーが発生しました: " + err.message, true);
+      setRSSStatus("エラーが発生しました: " + err.message, true);
     }
   }
 
@@ -125,13 +149,31 @@
       });
       const result = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setRSSStatus("❌ 削除に失敗しました: " + (result.error || res.status), true);
+        setRSSStatus("削除に失敗しました: " + (result.error || res.status), true);
         return;
       }
-      setRSSStatus("✅ RSS フィードを削除しました。", false);
+      setRSSStatus("RSS フィードを削除しました。", false);
       loadRSSList();
     } catch (err) {
-      setRSSStatus("❌ 削除でエラーが発生しました: " + err.message, true);
+      setRSSStatus("削除でエラーが発生しました: " + err.message, true);
+    }
+  }
+
+  async function saveTitle(url, title) {
+    try {
+      const res = await fetch("/api/rss/title", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, title }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRSSStatus("フィード名の保存に失敗しました: " + (result.error || res.status), true);
+        return;
+      }
+      setRSSStatus("フィード名を保存しました。", false);
+    } catch (err) {
+      setRSSStatus("保存でエラーが発生しました: " + err.message, true);
     }
   }
 
@@ -145,12 +187,12 @@
       });
       const result = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setRSSStatus("❌ プロンプトの保存に失敗しました: " + (result.error || res.status), true);
+        setRSSStatus("プロンプトの保存に失敗しました: " + (result.error || res.status), true);
         return;
       }
-      setRSSStatus("✅ プロンプトを保存しました。", false);
+      setRSSStatus("プロンプトを保存しました。", false);
     } catch (err) {
-      setRSSStatus("❌ 保存でエラーが発生しました: " + err.message, true);
+      setRSSStatus("保存でエラーが発生しました: " + err.message, true);
     } finally {
       if (btn) btn.disabled = false;
     }
