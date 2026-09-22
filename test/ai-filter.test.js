@@ -55,6 +55,21 @@ test("shouldNotify fails open (notifies) when no API key is set", async () => {
   });
 });
 
+test("shouldNotify does not call the model when the feed prompt is empty", async () => {
+  let called = false;
+  const { server, url } = await startOllamaMock(mockReply("NOTIFY: NO | REASON: should not run"));
+  try {
+    await withEnv({ OLLAMA_API_KEY: "test-key", OLLAMA_BASE_URL: url }, async () => {
+      const mod = await import(`../ai-filter.js?t=${Date.now()}`);
+      const decision = await mod.shouldNotify({ title: "テスト記事", body: "本文" });
+      assert.equal(decision.notify, true);
+      assert.equal(decision.skipped, true);
+    });
+  } finally {
+    server.close();
+  }
+});
+
 test("shouldNotify returns notify=false when the model says NO", async () => {
   const { server, url } = await startOllamaMock(mockReply("NOTIFY: NO | REASON: ルール外"));
   try {
@@ -64,7 +79,6 @@ test("shouldNotify returns notify=false when the model says NO", async () => {
         title: "カープ以外のニュース",
         body: "関係ない記事",
         feedPrompt: "カープのチケット販売情報以外は通知しない",
-        history: [],
       });
       assert.equal(decision.notify, false);
       assert.match(decision.reason, /ルール外/);
@@ -95,7 +109,7 @@ test("shouldNotify fails open when the model reply is unparseable", async () => 
   try {
     await withEnv({ OLLAMA_API_KEY: "test-key", OLLAMA_BASE_URL: url }, async () => {
       const mod = await import(`../ai-filter.js?t=${Date.now()}`);
-      const decision = await mod.shouldNotify({ title: "テスト" });
+      const decision = await mod.shouldNotify({ title: "テスト", feedPrompt: "特定ルール" });
       assert.equal(decision.notify, true);
     });
   } finally {
@@ -111,7 +125,7 @@ test("shouldNotify fails open on an HTTP error", async () => {
   try {
     await withEnv({ OLLAMA_API_KEY: "test-key", OLLAMA_BASE_URL: url }, async () => {
       const mod = await import(`../ai-filter.js?t=${Date.now()}`);
-      const decision = await mod.shouldNotify({ title: "テスト" });
+      const decision = await mod.shouldNotify({ title: "テスト", feedPrompt: "特定ルール" });
       assert.equal(decision.notify, true);
       assert.ok(decision.error);
     });
@@ -120,7 +134,7 @@ test("shouldNotify fails open on an HTTP error", async () => {
   }
 });
 
-test("shouldNotify includes feed prompt and history in the request", async () => {
+test("shouldNotify includes the feed prompt and article text in the request", async () => {
   let received = null;
   const { server, url } = await startOllamaMock((req, res) => {
     let raw = "";
@@ -138,11 +152,9 @@ test("shouldNotify includes feed prompt and history in the request", async () =>
         title: "新しい記事",
         body: "本文テキスト",
         feedPrompt: "特定ルール",
-        history: [{ title: "過去の記事", link: "https://example.com/old" }],
       });
       const content = received.messages[0].content;
       assert.match(content, /特定ルール/);
-      assert.match(content, /過去の記事/);
       assert.match(content, /新しい記事/);
       assert.match(content, /本文テキスト/);
     });

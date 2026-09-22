@@ -6,7 +6,6 @@ import {
   loadState,
   saveState,
   loadRSSFeeds,
-  loadHistory,
   recordNotification,
   recordDelivery,
 } from "./lib.js";
@@ -49,8 +48,6 @@ async function checkAndNotify() {
   }
 
   const state = await loadState();
-  // Recent notifications, used by the AI filter for duplicate detection.
-  const history = await loadHistory();
 
   for (const feedConfig of FEEDS) {
     const url = feedConfig.url;
@@ -74,8 +71,8 @@ async function checkAndNotify() {
       );
 
       // Process items oldest-first so notifications arrive in chronological order.
-      // Collect the articles to notify first, then send them serially.
-      const orderedItems = [...items].reverse();
+      // Every unseen entry is notified; there is no duplicate suppression.
+      const orderedItems = [...items];
       const toNotify = [];
 
       for (const item of orderedItems) {
@@ -98,12 +95,12 @@ async function checkAndNotify() {
         }
 
         // Ask the LLM whether this article should be notified at all.
+        // No prompt means no API call: notify every updated entry.
         // Fail-open: a disabled or failing filter still notifies.
         const decision = await shouldNotify({
           title,
           body: articleText || undefined,
           feedPrompt,
-          history,
         });
         if (!decision.notify) {
           console.log(`[AI-SKIP] ${title} — ${decision.reason || ""}`);
@@ -176,7 +173,6 @@ async function checkAndNotify() {
             sentAt: new Date().toISOString(),
           };
           await recordNotification(notified);
-          history.unshift(notified);
           console.log(`[NOTIFIED] ${a.title}`);
         }
       }

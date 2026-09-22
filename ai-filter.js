@@ -1,7 +1,7 @@
 // AI notification filtering via Ollama Cloud.
-// Decides whether a new article should be notified, using:
-//   - the feed's per-feed prompt (e.g. "カープのチケット販売情報以外は通知しない")
-//   - the recent notification history, to suppress duplicate/republished content
+// Filtering is opt-in per feed: the model runs only when the feed has a prompt.
+//   - feed prompt empty  -> no API call, every new article is notified
+//   - feed prompt set    -> the prompt alone decides (no built-in duplicate rule)
 // Set OLLAMA_API_KEY to enable. When unset or on any failure, the article is
 // notified (fail-open) so filtering never silently drops everything.
 
@@ -9,8 +9,6 @@ const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "https://ollama.com";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "minimax-m3";
 const REQUEST_TIMEOUT_MS = 60000;
 
-// How many recent notifications to show the model for duplicate detection.
-const HISTORY_WINDOW = 30;
 // How much article body to include in the prompt (keeps requests small).
 const BODY_EXCERPT_CHARS = 1200;
 
@@ -22,28 +20,15 @@ export function isAiFilterEnabled() {
   return Boolean(getApiKey());
 }
 
-function buildPrompt({ title, body, feedPrompt, history }) {
-  const historyLines = history.length
-    ? history
-        .map((h, i) => `${i + 1}. ${h.title}${h.link ? ` (${h.link})` : ""}`)
-        .join("\n")
-    : "(なし)";
-
+function buildPrompt({ title, body, feedPrompt }) {
   const articleBody = body
     ? body.slice(0, BODY_EXCERPT_CHARS)
     : "(本文を取得できませんでした)";
 
-  const customRule = feedPrompt?.trim()
-    ? feedPrompt.trim()
-    : "(指定なし — 新着記事は基本的に通知する)";
-
   return `あなたはニュース通知ボットの判定AIです。以下の新着記事を通知すべきか判定してください。
 
 # このフィードの通知ルール
-${customRule}
-
-# 最近すでに通知した記事(重複判定用)
-${historyLines}
+${feedPrompt.trim()}
 
 # 判定対象の新着記事
 タイトル: ${title}
@@ -51,8 +36,7 @@ ${historyLines}
 
 # 判定基準
 1. 上の「通知ルール」に沿っているか。ルールが除外を指示している内容なら通知しない。
-2. 「最近すでに通知した記事」と内容が実質同じ(転載・続報・重複)なら通知しない。
-3. 判断に迷う場合は、通知する側に倒す。
+2. 判断に迷う場合は、通知する側に倒す。
 
 # 出力形式
 必ず次の形式の1行だけを出力してください。余計な説明は書かないこと。
@@ -83,10 +67,15 @@ function extractContent(json) {
 
 /**
  * Decide whether to notify for one article.
- * @param {{ title: string, body?: string, feedPrompt?: string, history?: Array<{title:string,link?:string}> }} params
+ * The model is consulted only when the feed has a non-empty prompt.
+ * @param {{ title: string, body?: string, feedPrompt?: string }} params
  * @returns {Promise<{ notify: boolean, reason?: string, skipped?: boolean, error?: string }>}
  */
-export async function shouldNotify({ title, body, feedPrompt, history = [] }) {
+export async function shouldNotify({ title, body, feedPrompt }) {
+  if (!feedPrompt?.trim()) {
+    return { notify: true, skipped: true, reason: "No feed prompt; notifying" };
+  }
+
   const apiKey = getApiKey();
   if (!apiKey) {
     return { notify: true, skipped: true, reason: "AI filter disabled (no API key)" };
@@ -96,12 +85,7 @@ export async function shouldNotify({ title, body, feedPrompt, history = [] }) {
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const prompt = buildPrompt({
-      title,
-      body,
-      feedPrompt,
-      history: history.slice(0, HISTORY_WINDOW),
-    });
+    const prompt = buildPrompt({ title, body, feedPrompt });
 
     const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
       method: "POST",
