@@ -72,7 +72,7 @@ function renderPage(history, feeds) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>News Alert Bot - 管理画面</title>
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/app.css?v=tailwind-light-1">
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased">
   <div class="mx-auto max-w-3xl px-4 py-8 sm:py-12">
@@ -135,6 +135,7 @@ app.get("/", async (req, res) => {
   try {
     const [history, feeds] = await Promise.all([loadHistory(), loadRSSFeeds()]);
     const html = renderPage(history, feeds);
+    res.set("Cache-Control", "no-store");
     res.set("Content-Type", "text/html; charset=utf-8").send(html);
   } catch (e) {
     console.error("[ERROR] Failed to render admin page:", e);

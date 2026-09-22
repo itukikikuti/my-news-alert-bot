@@ -172,6 +172,13 @@ export async function recordNotification(entry) {
   await saveHistory(history);
 }
 
+/** Append one durable delivery event for post-incident diagnosis. */
+export async function recordDelivery(entry) {
+  const file = path.join(path.dirname(getStateFile()), "delivery-log.jsonl");
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, `${JSON.stringify(entry)}\n`, "utf-8");
+}
+
 // ---------------------------------------------------------------------------
 // RSS URL management
 // ---------------------------------------------------------------------------

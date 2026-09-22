@@ -19,6 +19,7 @@ import {
   setFeedPrompt,
   setFeedTitle,
   recordNotification,
+  recordDelivery,
   saveHistory,
   saveState,
 } from "../lib.js";
@@ -163,6 +164,18 @@ test("recordNotification stores entry with all fields", async () => {
     assert.equal(history[0].publishedAt, entry.publishedAt);
     assert.equal(history[0].feedUrl, entry.feedUrl);
     assert.equal(history[0].link, entry.link);
+  });
+});
+
+test("recordDelivery appends durable JSONL events beside the state file", async () => {
+  await withTempDataDir(async (tmpDir) => {
+    await recordDelivery({ status: "accepted", entryKey: "id:test", messageIds: ["projects/p/messages/1"] });
+    await recordDelivery({ status: "failed", entryKey: "id:test-2", errors: ["boom"] });
+    const logFile = path.join(tmpDir, "delivery-log.jsonl");
+    const lines = (await fs.readFile(logFile, "utf8")).trim().split("\n").map(JSON.parse);
+    assert.equal(lines.length, 2);
+    assert.equal(lines[0].status, "accepted");
+    assert.equal(lines[1].errors[0], "boom");
   });
 });
 

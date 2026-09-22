@@ -8,6 +8,7 @@ import {
   loadRSSFeeds,
   loadHistory,
   recordNotification,
+  recordDelivery,
 } from "./lib.js";
 import { sendFcmNotification, isFcmEnabled } from "./fcm.js";
 import { fetchArticleText } from "./article.js";
@@ -122,6 +123,7 @@ async function checkAndNotify() {
         for (let i = 0; i < toNotify.length; i++) {
           const a = toNotify[i];
           if (i > 0) await new Promise((r) => setTimeout(r, SEND_GAP_MS));
+          let delivered = false;
           try {
             const r = await sendFcmNotification({
               title: a.title,
@@ -131,29 +133,52 @@ async function checkAndNotify() {
             console.log(
               `[FCM] sent=${r.sent} failed=${r.failed} — ${a.title}`
             );
-            if (r.failed > 0) {
+            delivered = r.sent > 0 && r.failed === 0;
+            await recordDelivery({
+              attemptedAt: new Date().toISOString(),
+              status: delivered ? "accepted" : "failed",
+              title: a.title,
+              url: a.url,
+              entryKey: a.entryKey,
+              sent: r.sent,
+              failed: r.failed,
+              messageIds: r.messageIds,
+              errors: r.errors,
+            });
+            if (!delivered) {
               console.error(`[FCM] delivery failed for: ${a.title}`);
             }
           } catch (e) {
             console.error("[FCM] Failed to send notification:", e);
+            await recordDelivery({
+              attemptedAt: new Date().toISOString(),
+              status: "error",
+              title: a.title,
+              url: a.url,
+              entryKey: a.entryKey,
+              error: e.message,
+            });
           }
-        }
-      }
 
-      for (const a of toNotify) {
-        const notified = {
-          title: a.title,
-          link: a.url,
-          feedUrl: url,
-          entryKey: a.entryKey,
-          publishedAt: a.publishedAt,
-          sentAt: new Date().toISOString(),
-        };
-        await recordNotification(notified);
-        // Keep the in-memory history current so later articles in this run
-        // can be deduplicated against it.
-        history.unshift(notified);
-        console.log(`[NOTIFIED] ${a.title}`);
+          if (!delivered) {
+            // It was tentatively added before AI evaluation. Remove it so the
+            // next cron run retries instead of silently losing the article.
+            seenKeys.delete(a.entryKey);
+            continue;
+          }
+
+          const notified = {
+            title: a.title,
+            link: a.url,
+            feedUrl: url,
+            entryKey: a.entryKey,
+            publishedAt: a.publishedAt,
+            sentAt: new Date().toISOString(),
+          };
+          await recordNotification(notified);
+          history.unshift(notified);
+          console.log(`[NOTIFIED] ${a.title}`);
+        }
       }
 
       // Persist seen keys, keeping only the newest MAX_SEEN_KEYS entries.

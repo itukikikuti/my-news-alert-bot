@@ -128,20 +128,22 @@ function truncateToBytes(text, maxBytes) {
  * @returns {Promise<{ sent: number, failed: number }>}
  */
 export async function sendFcmNotification({ title, body, url }) {
-  if (!isFcmEnabled()) return { sent: 0, failed: 0 };
+  if (!isFcmEnabled()) return { sent: 0, failed: 0, messageIds: [], errors: ["FCM disabled"] };
 
   const tokens = getDeviceTokens();
   if (tokens.length === 0) {
     console.warn("[FCM] No device tokens configured (FCM_DEVICE_TOKENS)");
-    return { sent: 0, failed: 0 };
+    return { sent: 0, failed: 0, messageIds: [], errors: ["No device tokens configured"] };
   }
 
   const account = loadServiceAccount();
-  if (!account) return { sent: 0, failed: 0 };
+  if (!account) return { sent: 0, failed: 0, messageIds: [], errors: ["Service account unavailable"] };
   const endpoint = `https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`;
 
   let sent = 0;
   let failed = 0;
+  const messageIds = [];
+  const errors = [];
 
   for (const token of tokens) {
     // Each message is independent; no `collapse_key`/group so Android treats
@@ -180,12 +182,15 @@ export async function sendFcmNotification({ title, body, url }) {
         const text = await res.text().catch(() => "");
         throw new Error(`HTTP ${res.status} ${text.slice(0, 300)}`);
       }
+      const json = await res.json().catch(() => ({}));
       sent++;
+      if (json.name) messageIds.push(json.name);
     } catch (e) {
       failed++;
+      errors.push(e.message);
       console.error(`[FCM] Failed to send to ${token.slice(0, 12)}…: ${e.message}`);
     }
   }
 
-  return { sent, failed };
+  return { sent, failed, messageIds, errors };
 }

@@ -25,8 +25,7 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Run every 1 minute
-RUN echo "* * * * * /run.sh >> /var/log/cron.log 2>&1" > /etc/crontabs/root && \
-    touch /var/log/cron.log
+RUN echo "* * * * * /run.sh >> /data/cron.log 2>&1" > /etc/crontabs/root
 
 EXPOSE 3334
 
