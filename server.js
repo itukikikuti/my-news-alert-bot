@@ -54,14 +54,14 @@ function renderPage(history, feeds) {
       const feedTitle =
         feedTitles.get(entry.feedUrl) || entry.feedTitle || entry.feedUrl || "テスト送信";
       return `
-    <tr>
-      <td class="col-time">${htmlEscape(formatJst(entry.sentAt))}</td>
-      <td class="col-title">${
+    <tr class="border-b border-slate-100 align-top hover:bg-slate-50">
+      <td class="whitespace-nowrap py-2.5 pr-4 text-xs text-slate-500">${htmlEscape(formatJst(entry.sentAt))}</td>
+      <td class="py-2.5 pr-4">${
         entry.link
-          ? `<a href="${htmlEscape(entry.link)}" target="_blank" rel="noopener noreferrer">${htmlEscape(entry.title)}</a>`
+          ? `<a class="text-blue-600 hover:underline" href="${htmlEscape(entry.link)}" target="_blank" rel="noopener noreferrer">${htmlEscape(entry.title)}</a>`
           : htmlEscape(entry.title)
       }</td>
-      <td class="col-feed">${htmlEscape(feedTitle)}</td>
+      <td class="py-2.5 text-slate-600">${htmlEscape(feedTitle)}</td>
     </tr>`;
     })
     .join("");
@@ -72,185 +72,63 @@ function renderPage(history, feeds) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>News Alert Bot - 管理画面</title>
-  <style>
-    :root {
-      --bg: #0f1115;
-      --panel: #171a21;
-      --panel-2: #1e222b;
-      --border: #2a2f3a;
-      --text: #e6e9ef;
-      --muted: #9aa4b2;
-      --accent: #4c8dff;
-      --accent-hover: #6ba0ff;
-      --danger: #e5484d;
-      --success: #3fb950;
-    }
-    *, *::before, *::after { box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-    .wrap { max-width: 1040px; margin: 0 auto; padding: 2rem 1rem 4rem; }
-    header { padding: 0 0 1.25rem; border-bottom: 1px solid var(--border); margin-bottom: 2rem; }
-    h1 { font-size: 1.4rem; font-weight: 700; margin: 0 0 0.5rem; letter-spacing: 0.01em; }
-    h1 .dot { color: var(--accent); }
-    .status { font-size: 0.85rem; color: var(--muted); }
-    .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; }
-    .badge.on { background: rgba(63,185,80,0.15); color: var(--success); border: 1px solid rgba(63,185,80,0.35); }
-    .badge.off { background: rgba(229,72,77,0.12); color: var(--danger); border: 1px solid rgba(229,72,77,0.3); }
-    section { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem 1.25rem 1.5rem; margin-bottom: 1.5rem; }
-    h2 { font-size: 1.02rem; font-weight: 650; margin: 0 0 0.9rem; color: var(--text); }
-    .feedback { padding: 0.6rem 0.9rem; border-radius: 8px; margin: 0 0 1rem; font-size: 0.9rem; display: none; }
-    .feedback.show { display: block; }
-    .success { background: rgba(63,185,80,0.12); color: var(--success); border: 1px solid rgba(63,185,80,0.3); }
-    .error { background: rgba(229,72,77,0.12); color: var(--danger); border: 1px solid rgba(229,72,77,0.3); }
-    input[type="text"], input[type="url"], textarea {
-      padding: 0.55rem 0.75rem;
-      background: var(--panel-2);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      font-size: 0.95rem;
-      font-family: inherit;
-      outline: none;
-      transition: border-color 0.15s ease;
-    }
-    input:focus, textarea:focus { border-color: var(--accent); }
-    ::placeholder { color: #66707e; }
-    textarea { width: 100%; resize: vertical; }
-    button {
-      padding: 0.55rem 1.1rem;
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.92rem;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
-      font-family: inherit;
-      transition: background 0.15s ease, transform 0.05s ease;
-    }
-    button:hover { background: var(--accent-hover); }
-    button:active { transform: translateY(1px); }
-    button.secondary { background: #333a47; color: var(--text); }
-    button.secondary:hover { background: #3d4554; }
-    button.danger { background: transparent; color: var(--danger); border: 1px solid rgba(229,72,77,0.4); }
-    button.danger:hover { background: rgba(229,72,77,0.12); }
-    .apk-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: var(--accent);
-      color: #fff;
-      text-decoration: none;
-      padding: 0.7rem 1.3rem;
-      border-radius: 8px;
-      font-weight: 650;
-      font-size: 0.95rem;
-      transition: background 0.15s ease;
-    }
-    .apk-btn:hover { background: var(--accent-hover); }
-    .hint { font-size: 0.82rem; color: var(--muted); margin: 0.6rem 0 0; }
-    .add-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
-    .add-row input { flex: 1; min-width: 220px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
-    th, td { text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-    th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
-    tr:hover td { background: rgba(255,255,255,0.02); }
-    a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
-    a:hover { text-decoration: underline; }
-    .feed-name { font-weight: 600; }
-    .feed-url { display: block; font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; margin-top: 0.15rem; }
-    .col-time { white-space: nowrap; color: var(--muted); font-size: 0.82rem; width: 11rem; }
-    .empty { color: var(--muted); text-align: center; padding: 1.5rem; }
-    #rss-status { display: none; margin: 1rem 0; }
-    #rss-table { table-layout: fixed; }
-    #rss-table th:nth-child(1), #rss-table td:nth-child(1) { width: 2rem; }
-    #rss-table th:nth-child(2), #rss-table td:nth-child(2) { width: 42%; }
-    #rss-table th:nth-child(4), #rss-table td:nth-child(4) { width: 4.5rem; text-align: right; }
-    #rss-table td { overflow-wrap: anywhere; }
-    .prompt-box { display: flex; flex-direction: column; gap: 0.35rem; }
-    .prompt-box textarea { font-size: 0.82rem; width: 100%; }
-    .prompt-box button { align-self: flex-end; padding: 0.35rem 0.85rem; font-size: 0.8rem; }
-    .feed-box { display: flex; flex-direction: column; gap: 0.3rem; }
-    .feed-title-input {
-      font-size: 0.9rem;
-      font-weight: 600;
-      width: 100%;
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: 6px;
-      padding: 0.25rem 0.4rem;
-    }
-    .feed-title-input:hover { border-color: var(--border); }
-    .feed-title-input:focus { background: var(--panel-2); border-color: var(--accent); }
-    .feed-url { display: block; font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; margin-top: 0.15rem; padding-left: 0.4rem; }
-    @media (max-width: 600px) {
-      .wrap { padding: 1.25rem 0.75rem 3rem; }
-      #rss-table, #rss-table thead, #rss-table tbody, #rss-table tr, #rss-table th, #rss-table td { display: block; width: auto; }
-      #rss-table thead { display: none; }
-      #rss-table tr { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 0.8rem; padding: 0.6rem 0.7rem; background: var(--panel-2); }
-      #rss-table td { border: none; padding: 0.2rem 0; text-align: left; }
-      #rss-table td:nth-child(1) { display: none; }
-      #rss-table td:nth-child(4) { text-align: right; }
-      #rss-table .feed-title-input { text-align: left; padding-left: 0.4rem; }
-      #rss-table .feed-url { padding-left: 0.4rem; text-align: left; }
-      /* Keep the send time visible on phones instead of hiding the column. */
-      .col-time { width: auto; display: block; margin-bottom: 0.15rem; }
-      .log-table th:nth-child(1), .log-table td:nth-child(1) { display: block; }
-      .log-table th:nth-child(3), .log-table td:nth-child(3) { font-size: 0.8rem; color: var(--muted); }
-    }
-  </style>
+  <link rel="stylesheet" href="/app.css">
 </head>
-<body>
-  <div class="wrap">
-  <header>
-    <h1>News Alert Bot <span class="dot">●</span></h1>
-    <div class="status">AI判定: ${
-      aiFilterEnabled
-        ? '<span class="badge on">有効</span>'
-        : '<span class="badge off">無効</span> （OLLAMA_API_KEY 未設定）'
-    } — 各フィードの「通知プロンプト」に従って通知可否を判定します</div>
-  </header>
+<body class="bg-slate-50 text-slate-800 antialiased">
+  <div class="mx-auto max-w-3xl px-4 py-8 sm:py-12">
+    <header class="mb-8 flex items-baseline justify-between border-b border-slate-200 pb-5">
+      <div>
+        <h1 class="text-xl font-bold tracking-tight text-slate-900">News Alert Bot</h1>
+        <p class="mt-1 text-sm text-slate-500">
+          AI判定:
+          ${
+            aiFilterEnabled
+              ? '<span class="ml-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">有効</span>'
+              : '<span class="ml-1 inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-600/20">無効</span>'
+          }
+          — 各フィードの「通知プロンプト」に従って通知可否を判定します
+        </p>
+      </div>
+    </header>
 
-  <section>
-    <h2>Android アプリ</h2>
-    <p><a class="apk-btn" href="/download/apk">News Alert アプリをダウンロード (APK)</a></p>
-    <p class="hint">ダウンロード後、ファイルアプリから APK を開いてインストールしてください（「提供元不明のアプリ」の許可が必要です）。</p>
-  </section>
+    <section class="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="mb-4 text-base font-semibold text-slate-900">Android アプリ</h2>
+      <a class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700" href="/download/apk">News Alert アプリをダウンロード (APK)</a>
+      <p class="mt-3 text-xs text-slate-500">ダウンロード後、ファイルアプリから APK を開いてインストールしてください（「提供元不明のアプリ」の許可が必要です）。</p>
+    </section>
 
-  <section>
-    <h2>RSS フィード管理</h2>
-    <div id="rss-status" class="feedback"></div>
-    <div class="add-row">
-      <input type="url" id="rss-add-input" placeholder="RSS フィード URL (https://...)" maxlength="2000">
-      <button id="rss-add-btn" type="button">追加</button>
-    </div>
-    <div id="rss-list-container" style="margin-top:0.6rem;"><p class="empty">読み込み中...</p></div>
-  </section>
+    <section class="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="mb-4 text-base font-semibold text-slate-900">RSS フィード管理</h2>
+      <div id="rss-status" class="mb-3 hidden rounded-lg px-3 py-2 text-sm"></div>
+      <div class="flex flex-wrap items-center gap-2">
+        <input type="url" id="rss-add-input" placeholder="RSS フィード URL (https://...)" maxlength="2000"
+          class="min-w-[220px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+        <button id="rss-add-btn" type="button"
+          class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">追加</button>
+      </div>
+      <div id="rss-list-container" class="mt-4"><p class="py-6 text-center text-sm text-slate-400">読み込み中...</p></div>
+    </section>
 
-  <section>
-    <h2>通知履歴（直近 ${history.length} 件）</h2>
-    ${
-      history.length === 0
-        ? '<p class="empty">まだ通知はありません。</p>'
-        : `<table class="log-table">
-      <thead>
-        <tr><th>送信時刻 (JST)</th><th>タイトル / リンク</th><th>フィード</th></tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`
-    }
-  </section>
+    <section class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="mb-4 text-base font-semibold text-slate-900">通知履歴（直近 ${history.length} 件）</h2>
+      ${
+        history.length === 0
+          ? '<p class="py-6 text-center text-sm text-slate-400">まだ通知はありません。</p>'
+          : `<table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <th class="py-2 pr-4">送信時刻 (JST)</th><th class="py-2 pr-4">タイトル / リンク</th><th class="py-2">フィード</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`
+      }
+    </section>
   </div>
   <script src="/rss-client.js"></script>
 </body>
 </html>`;
+
 }
 
 app.get("/", async (req, res) => {

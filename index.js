@@ -18,6 +18,29 @@ const parser = new Parser();
 // Maximum number of seen entry keys kept per feed to prevent unbounded state growth.
 const MAX_SEEN_KEYS = 500;
 
+// Google Alerts occasionally answers with HTTP 500 for a feed. That is
+// transient, so retry a few times with backoff before giving up for this run.
+const FEED_FETCH_ATTEMPTS = 3;
+const FEED_FETCH_BACKOFF_MS = 2000;
+
+async function parseFeedWithRetry(url) {
+  let lastError;
+  for (let attempt = 1; attempt <= FEED_FETCH_ATTEMPTS; attempt++) {
+    try {
+      return await parser.parseURL(url);
+    } catch (e) {
+      lastError = e;
+      if (attempt < FEED_FETCH_ATTEMPTS) {
+        console.warn(
+          `[FEED] attempt ${attempt}/${FEED_FETCH_ATTEMPTS} failed for ${url}: ${e.message}`
+        );
+        await new Promise((r) => setTimeout(r, FEED_FETCH_BACKOFF_MS * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function checkAndNotify() {
   const FEEDS = await loadRSSFeeds();
   if (FEEDS.length === 0) {
@@ -32,7 +55,7 @@ async function checkAndNotify() {
     const url = feedConfig.url;
     const feedPrompt = feedConfig.prompt;
     try {
-      const feed = await parser.parseURL(url);
+      const feed = await parseFeedWithRetry(url);
       const items = feed.items ?? [];
       if (items.length === 0) {
         console.log(`[SKIP] no entries for ${url}`);
@@ -105,6 +128,9 @@ async function checkAndNotify() {
               body: a.body,
               url: a.url,
             });
+            console.log(
+              `[FCM] sent=${r.sent} failed=${r.failed} — ${a.title}`
+            );
             if (r.failed > 0) {
               console.error(`[FCM] delivery failed for: ${a.title}`);
             }

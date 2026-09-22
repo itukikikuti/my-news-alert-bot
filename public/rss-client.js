@@ -1,4 +1,4 @@
-/* rss-client.js – ブラウザ側 RSS フィード管理スクリプト */
+/* rss-client.js – ブラウザ側 RSS フィード管理スクリプト（Tailwind 版） */
 (function () {
   "use strict";
 
@@ -10,7 +10,18 @@
   function setRSSStatus(msg, isError) {
     if (!rssStatusEl) return;
     rssStatusEl.textContent = msg;
-    rssStatusEl.className = "feedback show " + (isError ? "error" : "success");
+    rssStatusEl.className =
+      "mb-3 rounded-lg px-3 py-2 text-sm " +
+      (isError
+        ? "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-600/20"
+        : "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20");
+  }
+
+  function emptyNote(text) {
+    const p = document.createElement("p");
+    p.className = "py-6 text-center text-sm text-slate-400";
+    p.textContent = text;
+    return p;
   }
 
   async function loadRSSList() {
@@ -21,17 +32,20 @@
       const list = await res.json();
 
       if (!Array.isArray(list) || list.length === 0) {
-        rssListContainer.innerHTML = '<p class="empty">監視中の RSS フィードはありません。</p>';
+        rssListContainer.replaceChildren(emptyNote("監視中の RSS フィードはありません。"));
         return;
       }
 
       // Build table using DOM APIs to avoid XSS from feed values
       const table = document.createElement("table");
-      table.id = "rss-table";
+      table.className = "w-full text-sm";
       const thead = table.createTHead();
       const headerRow = thead.insertRow();
+      headerRow.className =
+        "border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400";
       ["#", "フィード", "通知プロンプト (AI判定)", "操作"].forEach((text) => {
         const th = document.createElement("th");
+        th.className = "py-2 pr-4";
         th.textContent = text;
         headerRow.appendChild(th);
       });
@@ -43,29 +57,34 @@
         const title = typeof feed === "string" ? "" : feed.title || "";
 
         const row = tbody.insertRow();
-        row.insertCell().textContent = String(i + 1);
+        row.className = "border-b border-slate-100 align-top";
+
+        const numCell = row.insertCell();
+        numCell.className = "py-3 pr-4 text-slate-400";
+        numCell.textContent = String(i + 1);
 
         // Feed cell: editable title + the underlying URL.
         const feedCell = row.insertCell();
+        feedCell.className = "py-3 pr-4";
         const box = document.createElement("div");
-        box.className = "feed-box";
+        box.className = "flex flex-col gap-1";
 
         const titleInput = document.createElement("input");
         titleInput.type = "text";
-        titleInput.className = "feed-title-input";
         titleInput.maxLength = 200;
         titleInput.placeholder = "フィード名（表示用）";
         titleInput.value = title;
+        titleInput.className =
+          "w-full rounded-md border border-slate-300 px-2 py-1 text-sm font-semibold outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
 
         const urlLine = document.createElement("span");
-        urlLine.className = "feed-url";
+        urlLine.className = "block text-xs text-slate-400 [overflow-wrap:anywhere]";
         urlLine.textContent = url;
 
         box.appendChild(titleInput);
         box.appendChild(urlLine);
         feedCell.appendChild(box);
 
-        // Save the title when focus leaves the field or Enter is pressed.
         titleInput.addEventListener("blur", () => saveTitle(url, titleInput.value));
         titleInput.addEventListener("keydown", (e) => {
           if (e.key === "Enter") {
@@ -76,37 +95,41 @@
 
         // Per-feed AI prompt: textarea + save button
         const promptCell = row.insertCell();
+        promptCell.className = "py-3 pr-4";
         const promptBox = document.createElement("div");
-        promptBox.className = "prompt-box";
+        promptBox.className = "flex flex-col items-end gap-1";
         const textarea = document.createElement("textarea");
         textarea.rows = 2;
         textarea.maxLength = 2000;
         textarea.placeholder = "例: 広島カープのチケット販売情報以外は通知しないでください";
         textarea.value = prompt;
+        textarea.className =
+          "w-full rounded-md border border-slate-300 px-2 py-1 text-xs outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
         const saveBtn = document.createElement("button");
         saveBtn.type = "button";
-        saveBtn.className = "secondary";
         saveBtn.textContent = "保存";
+        saveBtn.className =
+          "rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50";
         saveBtn.addEventListener("click", () => savePrompt(url, textarea.value, saveBtn));
         promptBox.appendChild(textarea);
         promptBox.appendChild(saveBtn);
         promptCell.appendChild(promptBox);
 
         const btnCell = row.insertCell();
+        btnCell.className = "py-3 text-right";
         const btn = document.createElement("button");
-        btn.className = "danger";
         btn.textContent = "削除";
+        btn.className =
+          "rounded-md border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-50";
         btn.addEventListener("click", () => deleteRSSUrl(url));
         btnCell.appendChild(btn);
       });
 
       rssListContainer.replaceChildren(table);
     } catch (err) {
-      rssListContainer.innerHTML = "";
-      const p = document.createElement("p");
-      p.className = "empty";
-      p.textContent = "読み込みに失敗しました: " + err.message;
-      rssListContainer.appendChild(p);
+      rssListContainer.replaceChildren(
+        emptyNote("読み込みに失敗しました: " + err.message)
+      );
     }
   }
 
