@@ -62,14 +62,37 @@ function renderPage(history, feeds) {
     .map((entry) => {
       const feedTitle =
         feedTitles.get(entry.feedUrl) || entry.feedTitle || entry.feedUrl || "テスト送信";
+      // Entries written before this feature have no flag; treat them as notified.
+      const wasNotified = entry.notified !== false;
+      const badge = wasNotified
+        ? '<span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">通知</span>'
+        : '<span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-inset ring-slate-400/20">除外</span>';
+
+      // Show why the article was filtered: the feed prompt and the model reply.
+      const detail = [];
+      if (entry.feedPrompt) {
+        detail.push(
+          `<div class="mt-2 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600"><span class="font-semibold text-slate-500">プロンプト:</span> ${htmlEscape(entry.feedPrompt)}</div>`
+        );
+      }
+      if (entry.aiReply) {
+        detail.push(
+          `<div class="mt-1 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600"><span class="font-semibold text-slate-500">AI応答:</span> ${htmlEscape(entry.aiReply)}</div>`
+        );
+      } else if (!wasNotified && entry.aiSkipped) {
+        detail.push(
+          `<div class="mt-1 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs text-slate-500">プロンプト未設定のためAI判定なし</div>`
+        );
+      }
+
       return `
     <tr class="border-b border-slate-100 align-top hover:bg-slate-50">
-      <td class="whitespace-nowrap py-3 pr-4 align-top text-xs text-slate-500">${htmlEscape(formatJst(entry.sentAt))}</td>
-      <td class="py-3 pr-4">${
+      <td class="whitespace-nowrap py-3 pr-2 align-top text-xs text-slate-500">${htmlEscape(formatJst(entry.sentAt))}</td>
+      <td class="py-3 pr-4"><div class="flex items-start gap-1.5">${badge}<div class="min-w-0">${
         entry.link
           ? `<a class="break-words font-medium text-slate-800 hover:text-blue-600 hover:underline" href="${htmlEscape(entry.link)}" target="_blank" rel="noopener noreferrer">${htmlEscape(entry.title)}</a>`
-          : `<span class="font-medium text-slate-800">${htmlEscape(entry.title)}</span>`
-      }<div class="mt-0.5 text-xs text-slate-400">${htmlEscape(feedTitle)}</div></td>
+          : `<span class="break-words font-medium text-slate-800">${htmlEscape(entry.title)}</span>`
+      }</div></div><div class="mt-0.5 text-xs text-slate-400">${htmlEscape(feedTitle)}</div>${detail.join("")}</td>
     </tr>`;
     })
     .join("");
@@ -118,7 +141,8 @@ function renderPage(history, feeds) {
     </section>
 
     <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-      <h2 class="mb-3 text-base font-semibold text-slate-900">通知履歴</h2>
+      <h2 class="mb-1 text-base font-semibold text-slate-900">通知履歴</h2>
+      <p class="mb-3 text-xs text-slate-400">通知した記事と、AI判定で除外した記事をその理由とともに表示します。</p>
       ${
         history.length === 0
           ? '<p class="py-6 text-center text-sm text-slate-400">まだ通知はありません。</p>'

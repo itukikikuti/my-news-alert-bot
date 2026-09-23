@@ -108,13 +108,14 @@ export async function shouldNotify({ title, body, feedPrompt }) {
     }
 
     const json = await res.json();
-    const decision = parseDecision(extractContent(json));
+    const rawReply = extractContent(json);
+    const decision = parseDecision(rawReply);
     if (!decision) {
       // Unparseable answer: fail open (notify) but surface the reason.
-      console.warn("[AI] Unparseable decision, notifying anyway:", extractContent(json).slice(0, 120));
-      return { notify: true, reason: "AI応答を解釈できず通知" };
+      console.warn("[AI] Unparseable decision, notifying anyway:", rawReply.slice(0, 120));
+      return { notify: true, reason: "AI応答を解釈できず通知", rawReply };
     }
-    return decision;
+    return { ...decision, rawReply };
   } catch (e) {
     console.warn(`[AI] Filter failed, notifying anyway: ${e.message}`);
     return { notify: true, error: e.message, reason: "AI判定失敗のため通知" };

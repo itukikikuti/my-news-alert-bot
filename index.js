@@ -7,6 +7,7 @@ import {
   saveState,
   loadRSSFeeds,
   recordNotification,
+  recordSkipped,
   recordDelivery,
 } from "./lib.js";
 import { sendFcmNotification, isFcmEnabled } from "./fcm.js";
@@ -110,10 +111,34 @@ async function checkAndNotify() {
         });
         if (!decision.notify) {
           console.log(`[AI-SKIP] ${title} — ${decision.reason || ""}`);
+          // Keep the skipped article visible in the admin UI, with the prompt
+          // that decided it and the model's own reply.
+          await recordSkipped({
+            title,
+            link,
+            feedUrl: url,
+            entryKey,
+            publishedAt,
+            sentAt: new Date().toISOString(),
+            notified: false,
+            feedPrompt: feedPrompt || "",
+            aiReply: decision.rawReply || "",
+            aiReason: decision.reason || "",
+            aiSkipped: decision.skipped === true,
+          });
           continue;
         }
 
-        toNotify.push({ title, body: articleText || undefined, url: link, entryKey, publishedAt });
+        toNotify.push({
+          title,
+          body: articleText || undefined,
+          url: link,
+          entryKey,
+          publishedAt,
+          aiReply: decision.rawReply || "",
+          aiReason: decision.reason || "",
+          aiSkipped: decision.skipped === true,
+        });
       }
 
       // Send notifications. FCM gets one message per article so the Android app
@@ -177,6 +202,11 @@ async function checkAndNotify() {
             entryKey: a.entryKey,
             publishedAt: a.publishedAt,
             sentAt: new Date().toISOString(),
+            notified: true,
+            feedPrompt: feedPrompt || "",
+            aiReply: a.aiReply || "",
+            aiReason: a.aiReason || "",
+            aiSkipped: a.aiSkipped === true,
           };
           await recordNotification(notified);
           console.log(`[NOTIFIED] ${a.title}`);

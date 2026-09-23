@@ -188,6 +188,17 @@ export async function recordNotification(entry) {
   await saveHistory(history);
 }
 
+/**
+ * Record an article that was evaluated but not notified, together with the
+ * feed prompt and the AI reply, so the admin UI can explain every decision.
+ */
+export async function recordSkipped(entry) {
+  const history = await loadHistory();
+  history.unshift({ ...entry, notified: false });
+  if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
+  await saveHistory(history);
+}
+
 /** Append one durable delivery event for post-incident diagnosis. */
 export async function recordDelivery(entry) {
   const file = path.join(path.dirname(getStateFile()), "delivery-log.jsonl");
