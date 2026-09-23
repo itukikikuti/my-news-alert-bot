@@ -18,10 +18,12 @@ const parser = new Parser();
 // Maximum number of seen entry keys kept per feed to prevent unbounded state growth.
 const MAX_SEEN_KEYS = 500;
 
-// Google Alerts occasionally answers with HTTP 500 for a feed. That is
-// transient, so retry a few times with backoff before giving up for this run.
-const FEED_FETCH_ATTEMPTS = 3;
+// Google Alerts intermittently answers HTTP 500 for minutes at a time. Give a
+// failing feed enough room to recover inside one run: 6 attempts with growing
+// backoff, capped so a single feed cannot run past roughly one cron interval.
+const FEED_FETCH_ATTEMPTS = 6;
 const FEED_FETCH_BACKOFF_MS = 2000;
+const FEED_FETCH_MAX_BACKOFF_MS = 15000;
 
 async function parseFeedWithRetry(url) {
   let lastError;
@@ -31,10 +33,14 @@ async function parseFeedWithRetry(url) {
     } catch (e) {
       lastError = e;
       if (attempt < FEED_FETCH_ATTEMPTS) {
-        console.warn(
-          `[FEED] attempt ${attempt}/${FEED_FETCH_ATTEMPTS} failed for ${url}: ${e.message}`
+        const delay = Math.min(
+          FEED_FETCH_BACKOFF_MS * attempt,
+          FEED_FETCH_MAX_BACKOFF_MS
         );
-        await new Promise((r) => setTimeout(r, FEED_FETCH_BACKOFF_MS * attempt));
+        console.warn(
+          `[FEED] attempt ${attempt}/${FEED_FETCH_ATTEMPTS} failed for ${url}: ${e.message} — retrying in ${delay}ms`
+        );
+        await new Promise((r) => setTimeout(r, delay));
       }
     }
   }
