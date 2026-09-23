@@ -83,37 +83,23 @@
         head.appendChild(delBtn);
         card.appendChild(head);
 
-        // URL stays collapsed: it is long and rarely read.
-        const urlDetails = document.createElement("details");
-        urlDetails.className = "mt-2 pl-9";
-        const urlSummary = document.createElement("summary");
-        urlSummary.className =
-          "cursor-pointer list-none text-xs text-slate-400 transition hover:text-slate-600";
-        urlSummary.textContent = "URL を表示";
+        // URL stays visible: it identifies the feed at a glance.
         const urlValue = document.createElement("div");
         urlValue.className =
-          "mt-1 text-xs text-slate-500 [overflow-wrap:anywhere]";
+          "mt-2 pl-9 text-xs text-slate-400 [overflow-wrap:anywhere]";
         urlValue.textContent = url;
-        urlDetails.appendChild(urlSummary);
-        urlDetails.appendChild(urlValue);
-        card.appendChild(urlDetails);
+        card.appendChild(urlValue);
 
-        // Prompt editor: label + hint + textarea + save.
+        // Prompt editor: label + textarea + save.
         const label = document.createElement("label");
         label.className = "mt-3 block pl-9 text-xs font-medium text-slate-600";
         label.textContent = "通知プロンプト（任意）";
         card.appendChild(label);
 
-        const hint = document.createElement("p");
-        hint.className = "mt-1 pl-9 text-xs text-slate-400";
-        hint.textContent =
-          "空欄なら新着をすべて通知します。書くとAIがその条件で絞り込みます。";
-        card.appendChild(hint);
-
         const textarea = document.createElement("textarea");
         textarea.rows = 3;
         textarea.maxLength = 2000;
-        textarea.placeholder = "例: 広島カープのチケット販売情報以外は通知しない";
+        textarea.placeholder = "空欄なら全て通知。書くとAIが絞り込みます。";
         textarea.value = prompt;
         textarea.className =
           "mt-2 ml-9 w-[calc(100%-2.25rem)] rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";

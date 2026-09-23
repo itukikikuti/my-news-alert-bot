@@ -99,15 +99,11 @@ function renderPage(history, feeds) {
             : '<span class="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700 ring-1 ring-inset ring-amber-600/20">AI利用不可（APIキー未設定）</span>'
         }
       </div>
-      <p class="mt-2 text-xs leading-relaxed text-slate-500">
-        通知プロンプトを書いたフィードはAIが判定し、空欄のフィードは新着をすべて通知します。
-      </p>
     </header>
 
     <section class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:mb-6 sm:p-6">
       <h2 class="mb-3 text-base font-semibold text-slate-900">Android アプリ</h2>
       <a class="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:w-auto sm:py-2.5" href="/download/apk">News Alert アプリをダウンロード (APK)</a>
-      <p class="mt-3 text-xs leading-relaxed text-slate-500">ダウンロード後、ファイルアプリから APK を開いてインストールしてください（「提供元不明のアプリ」の許可が必要です）。</p>
     </section>
 
     <section class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:mb-6 sm:p-6">
