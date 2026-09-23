@@ -49,19 +49,27 @@ function renderPage(history, feeds) {
   const feedTitles = new Map(
     (feeds || []).map((f) => [f.url, (f.title || "").trim()])
   );
+
+  // Summary of how notifications are currently decided: feeds with a prompt are
+  // AI-filtered, feeds without one notify every new entry.
+  const feedCount = (feeds || []).length;
+  const promptedCount = (feeds || []).filter(
+    (f) => (f.prompt || "").trim().length > 0
+  ).length;
+  const allNotifyCount = feedCount - promptedCount;
+
   const rows = history
     .map((entry) => {
       const feedTitle =
         feedTitles.get(entry.feedUrl) || entry.feedTitle || entry.feedUrl || "テスト送信";
       return `
     <tr class="border-b border-slate-100 align-top hover:bg-slate-50">
-      <td class="whitespace-nowrap py-2.5 pr-4 text-xs text-slate-500">${htmlEscape(formatJst(entry.sentAt))}</td>
-      <td class="py-2.5 pr-4">${
+      <td class="whitespace-nowrap py-3 pr-4 align-top text-xs text-slate-500">${htmlEscape(formatJst(entry.sentAt))}</td>
+      <td class="py-3 pr-4">${
         entry.link
-          ? `<a class="text-blue-600 hover:underline" href="${htmlEscape(entry.link)}" target="_blank" rel="noopener noreferrer">${htmlEscape(entry.title)}</a>`
-          : htmlEscape(entry.title)
-      }</td>
-      <td class="py-2.5 text-slate-600">${htmlEscape(feedTitle)}</td>
+          ? `<a class="break-words font-medium text-slate-800 hover:text-blue-600 hover:underline" href="${htmlEscape(entry.link)}" target="_blank" rel="noopener noreferrer">${htmlEscape(entry.title)}</a>`
+          : `<span class="font-medium text-slate-800">${htmlEscape(entry.title)}</span>`
+      }<div class="mt-0.5 text-xs text-slate-400">${htmlEscape(feedTitle)}</div></td>
     </tr>`;
     })
     .join("");
@@ -72,56 +80,61 @@ function renderPage(history, feeds) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>News Alert Bot - 管理画面</title>
-  <link rel="stylesheet" href="/app.css?v=tailwind-light-1">
+  <link rel="stylesheet" href="/app.css?v=tailwind-light-2">
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased">
-  <div class="mx-auto max-w-3xl px-4 py-8 sm:py-12">
-    <header class="mb-8 flex items-baseline justify-between border-b border-slate-200 pb-5">
-      <div>
-        <h1 class="text-xl font-bold tracking-tight text-slate-900">News Alert Bot</h1>
-        <p class="mt-1 text-sm text-slate-500">
-          AI判定:
-          ${
-            aiFilterEnabled
-              ? '<span class="ml-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">有効</span>'
-              : '<span class="ml-1 inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-600/20">無効</span>'
-          }
-          — 各フィードの「通知プロンプト」に従って通知可否を判定します
-        </p>
+  <div class="mx-auto max-w-3xl px-4 py-6 sm:py-12">
+    <header class="mb-6 border-b border-slate-200 pb-5 sm:mb-8">
+      <h1 class="text-xl font-bold tracking-tight text-slate-900">News Alert Bot</h1>
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+        <span class="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
+          AI判定あり ${promptedCount}件
+        </span>
+        <span class="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+          全件通知 ${allNotifyCount}件
+        </span>
+        ${
+          aiFilterEnabled
+            ? ""
+            : '<span class="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700 ring-1 ring-inset ring-amber-600/20">AI利用不可（APIキー未設定）</span>'
+        }
       </div>
+      <p class="mt-2 text-xs leading-relaxed text-slate-500">
+        通知プロンプトを書いたフィードはAIが判定し、空欄のフィードは新着をすべて通知します。
+      </p>
     </header>
 
-    <section class="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 class="mb-4 text-base font-semibold text-slate-900">Android アプリ</h2>
-      <a class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700" href="/download/apk">News Alert アプリをダウンロード (APK)</a>
-      <p class="mt-3 text-xs text-slate-500">ダウンロード後、ファイルアプリから APK を開いてインストールしてください（「提供元不明のアプリ」の許可が必要です）。</p>
+    <section class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:mb-6 sm:p-6">
+      <h2 class="mb-3 text-base font-semibold text-slate-900">Android アプリ</h2>
+      <a class="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:w-auto sm:py-2.5" href="/download/apk">News Alert アプリをダウンロード (APK)</a>
+      <p class="mt-3 text-xs leading-relaxed text-slate-500">ダウンロード後、ファイルアプリから APK を開いてインストールしてください（「提供元不明のアプリ」の許可が必要です）。</p>
     </section>
 
-    <section class="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 class="mb-4 text-base font-semibold text-slate-900">RSS フィード管理</h2>
+    <section class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:mb-6 sm:p-6">
+      <h2 class="mb-3 text-base font-semibold text-slate-900">RSS フィード管理</h2>
       <div id="rss-status" class="mb-3 hidden rounded-lg px-3 py-2 text-sm"></div>
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input type="url" id="rss-add-input" placeholder="RSS フィード URL (https://...)" maxlength="2000"
-          class="min-w-[220px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+          class="w-full flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
         <button id="rss-add-btn" type="button"
-          class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">追加</button>
+          class="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 sm:w-auto">追加</button>
       </div>
-      <div id="rss-list-container" class="mt-4"><p class="py-6 text-center text-sm text-slate-400">読み込み中...</p></div>
+      <div id="rss-list-container" class="mt-4 space-y-3"><p class="py-6 text-center text-sm text-slate-400">読み込み中...</p></div>
     </section>
 
-    <section class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 class="mb-4 text-base font-semibold text-slate-900">通知履歴（直近 ${history.length} 件）</h2>
+    <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <h2 class="mb-3 text-base font-semibold text-slate-900">通知履歴</h2>
       ${
         history.length === 0
           ? '<p class="py-6 text-center text-sm text-slate-400">まだ通知はありません。</p>'
-          : `<table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-            <th class="py-2 pr-4">送信時刻 (JST)</th><th class="py-2 pr-4">タイトル / リンク</th><th class="py-2">フィード</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>`
+          : `<details class="group" open>
+        <summary class="cursor-pointer list-none text-xs font-medium text-slate-500 transition hover:text-slate-700">
+          直近 ${history.length} 件を表示
+        </summary>
+        <table class="mt-3 w-full text-sm">
+          <tbody>${rows}</tbody>
+        </table>
+      </details>`
       }
     </section>
   </div>

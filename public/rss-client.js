@@ -36,38 +36,25 @@
         return;
       }
 
-      // Build table using DOM APIs to avoid XSS from feed values
-      const table = document.createElement("table");
-      table.className = "w-full text-sm";
-      const thead = table.createTHead();
-      const headerRow = thead.insertRow();
-      headerRow.className =
-        "border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400";
-      ["#", "フィード", "通知プロンプト (AI判定)", "操作"].forEach((text) => {
-        const th = document.createElement("th");
-        th.className = "py-2 pr-4";
-        th.textContent = text;
-        headerRow.appendChild(th);
-      });
-      const tbody = table.createTBody();
-
-      list.forEach((feed, i) => {
+      // Render one card per feed. Cards keep long URLs and the prompt editor
+      // readable on a phone, where a four-column table collapses badly.
+      const cards = list.map((feed, i) => {
         const url = typeof feed === "string" ? feed : feed.url;
         const prompt = typeof feed === "string" ? "" : feed.prompt || "";
         const title = typeof feed === "string" ? "" : feed.title || "";
 
-        const row = tbody.insertRow();
-        row.className = "border-b border-slate-100 align-top";
+        const card = document.createElement("div");
+        card.className =
+          "rounded-lg border border-slate-200 bg-slate-50/60 p-4";
 
-        const numCell = row.insertCell();
-        numCell.className = "py-3 pr-4 text-slate-400";
-        numCell.textContent = String(i + 1);
+        // Card head: number + editable feed name + delete.
+        const head = document.createElement("div");
+        head.className = "flex items-start gap-3";
 
-        // Feed cell: editable title + the underlying URL.
-        const feedCell = row.insertCell();
-        feedCell.className = "py-3 pr-4";
-        const box = document.createElement("div");
-        box.className = "flex flex-col gap-1";
+        const badge = document.createElement("span");
+        badge.className =
+          "mt-1 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-600";
+        badge.textContent = String(i + 1);
 
         const titleInput = document.createElement("input");
         titleInput.type = "text";
@@ -75,16 +62,7 @@
         titleInput.placeholder = "フィード名（表示用）";
         titleInput.value = title;
         titleInput.className =
-          "w-full rounded-md border border-slate-300 px-2 py-1 text-sm font-semibold outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
-
-        const urlLine = document.createElement("span");
-        urlLine.className = "block text-xs text-slate-400 [overflow-wrap:anywhere]";
-        urlLine.textContent = url;
-
-        box.appendChild(titleInput);
-        box.appendChild(urlLine);
-        feedCell.appendChild(box);
-
+          "min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm font-semibold outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
         titleInput.addEventListener("blur", () => saveTitle(url, titleInput.value));
         titleInput.addEventListener("keydown", (e) => {
           if (e.key === "Enter") {
@@ -93,39 +71,69 @@
           }
         });
 
-        // Per-feed AI prompt: textarea + save button
-        const promptCell = row.insertCell();
-        promptCell.className = "py-3 pr-4";
-        const promptBox = document.createElement("div");
-        promptBox.className = "flex flex-col items-end gap-1";
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.textContent = "削除";
+        delBtn.className =
+          "flex-none whitespace-nowrap rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 transition hover:bg-rose-50";
+        delBtn.addEventListener("click", () => deleteRSSUrl(url));
+
+        head.appendChild(badge);
+        head.appendChild(titleInput);
+        head.appendChild(delBtn);
+        card.appendChild(head);
+
+        // URL stays collapsed: it is long and rarely read.
+        const urlDetails = document.createElement("details");
+        urlDetails.className = "mt-2 pl-9";
+        const urlSummary = document.createElement("summary");
+        urlSummary.className =
+          "cursor-pointer list-none text-xs text-slate-400 transition hover:text-slate-600";
+        urlSummary.textContent = "URL を表示";
+        const urlValue = document.createElement("div");
+        urlValue.className =
+          "mt-1 text-xs text-slate-500 [overflow-wrap:anywhere]";
+        urlValue.textContent = url;
+        urlDetails.appendChild(urlSummary);
+        urlDetails.appendChild(urlValue);
+        card.appendChild(urlDetails);
+
+        // Prompt editor: label + hint + textarea + save.
+        const label = document.createElement("label");
+        label.className = "mt-3 block pl-9 text-xs font-medium text-slate-600";
+        label.textContent = "通知プロンプト（任意）";
+        card.appendChild(label);
+
+        const hint = document.createElement("p");
+        hint.className = "mt-1 pl-9 text-xs text-slate-400";
+        hint.textContent =
+          "空欄なら新着をすべて通知します。書くとAIがその条件で絞り込みます。";
+        card.appendChild(hint);
+
         const textarea = document.createElement("textarea");
-        textarea.rows = 2;
+        textarea.rows = 3;
         textarea.maxLength = 2000;
-        textarea.placeholder = "例: 広島カープのチケット販売情報以外は通知しないでください";
+        textarea.placeholder = "例: 広島カープのチケット販売情報以外は通知しない";
         textarea.value = prompt;
         textarea.className =
-          "w-full rounded-md border border-slate-300 px-2 py-1 text-xs outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
+          "mt-2 ml-9 w-[calc(100%-2.25rem)] rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
+        card.appendChild(textarea);
+
+        const actions = document.createElement("div");
+        actions.className = "mt-2 flex justify-end pl-9";
         const saveBtn = document.createElement("button");
         saveBtn.type = "button";
         saveBtn.textContent = "保存";
         saveBtn.className =
-          "rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50";
+          "whitespace-nowrap rounded-md bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50";
         saveBtn.addEventListener("click", () => savePrompt(url, textarea.value, saveBtn));
-        promptBox.appendChild(textarea);
-        promptBox.appendChild(saveBtn);
-        promptCell.appendChild(promptBox);
+        actions.appendChild(saveBtn);
+        card.appendChild(actions);
 
-        const btnCell = row.insertCell();
-        btnCell.className = "py-3 text-right";
-        const btn = document.createElement("button");
-        btn.textContent = "削除";
-        btn.className =
-          "rounded-md border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-50";
-        btn.addEventListener("click", () => deleteRSSUrl(url));
-        btnCell.appendChild(btn);
+        return card;
       });
 
-      rssListContainer.replaceChildren(table);
+      rssListContainer.replaceChildren(...cards);
     } catch (err) {
       rssListContainer.replaceChildren(
         emptyNote("読み込みに失敗しました: " + err.message)
