@@ -86,8 +86,7 @@ function renderPage(history, feeds) {
   <div class="mx-auto max-w-3xl px-4 py-6 sm:py-12">
     <header class="mb-6 border-b border-slate-200 pb-5 sm:mb-8">
       <h1 class="text-xl font-bold tracking-tight text-slate-900">News Alert Bot</h1>
-      <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-        <span class="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">        <span class="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
           AI判定あり ${promptedCount}件
         </span>
         <span class="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
@@ -214,7 +213,7 @@ app.delete("/api/rss", async (req, res) => {
   }
 });
 
-// Update the cached display title of a feed.
+// Feed titles are set automatically from the feed's own <title> when added.
 app.put("/api/rss/title", async (req, res) => {
   const url = String(req.body?.url ?? "").trim();
   if (!url) {

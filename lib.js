@@ -75,14 +75,30 @@ export function cleanText(input) {
     .trim();
 }
 
+// Fetch the feed's own title so a newly added feed is labelled automatically.
+// Best effort: an unreachable feed still gets added, just without a title.
+export async function fetchFeedTitle(url) {
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "news-alert-bot/1.0" } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const xml = await res.text();
+    const match = xml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (!match) return "";
+    const raw = match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+    return cleanText(raw).slice(0, 200);
+  } catch (e) {
+    console.warn(`[FEED] Could not read title for ${url}: ${e.message}`);
+    return "";
+  }
+}
+
 /**
  * Derive a stable deduplication key for an RSS/Atom feed item.
  * Priority:
  *   1. entry.id / guid  (most stable Atom identifier)
  *   2. canonical target URL (Google redirect unwrapped)
  *   3. normalized title + published timestamp
- */
-export function deriveEntryKey(item) {
+ */export function deriveEntryKey(item) {
   const id = (item?.id || item?.guid || "").trim();
   if (id) return `id:${id}`;
 
@@ -285,7 +301,9 @@ export async function addRSSUrl(url) {
   if (feeds.some((f) => f.url === trimmed)) {
     throw new Error("URL already exists");
   }
-  feeds.push({ url: trimmed, prompt: "", title: "" });
+  // Label the feed from its own <title> so the name appears without manual entry.
+  const title = await fetchFeedTitle(trimmed);
+  feeds.push({ url: trimmed, prompt: "", title });
   await saveRSSFeeds(feeds);
   return feeds;
 }

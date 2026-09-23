@@ -56,20 +56,11 @@
           "mt-1 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-600";
         badge.textContent = String(i + 1);
 
-        const titleInput = document.createElement("input");
-        titleInput.type = "text";
-        titleInput.maxLength = 200;
-        titleInput.placeholder = "フィード名（表示用）";
-        titleInput.value = title;
-        titleInput.className =
-          "min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm font-semibold outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
-        titleInput.addEventListener("blur", () => saveTitle(url, titleInput.value));
-        titleInput.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            titleInput.blur();
-          }
-        });
+        // Feed name comes from the feed itself; it is not editable here.
+        const titleEl = document.createElement("div");
+        titleEl.className =
+          "min-w-0 flex-1 break-words pt-0.5 text-sm font-semibold text-slate-900";
+        titleEl.textContent = title || "(名称未設定)";
 
         const delBtn = document.createElement("button");
         delBtn.type = "button";
@@ -79,7 +70,7 @@
         delBtn.addEventListener("click", () => deleteRSSUrl(url));
 
         head.appendChild(badge);
-        head.appendChild(titleInput);
+        head.appendChild(titleEl);
         head.appendChild(delBtn);
         card.appendChild(head);
 
@@ -99,7 +90,8 @@
         const textarea = document.createElement("textarea");
         textarea.rows = 3;
         textarea.maxLength = 2000;
-        textarea.placeholder = "空欄なら全て通知。書くとAIが絞り込みます。";
+        textarea.placeholder =
+          "例: 広島カープのチケット販売情報以外は通知しない";
         textarea.value = prompt;
         textarea.className =
           "mt-2 ml-9 w-[calc(100%-2.25rem)] rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
@@ -173,24 +165,6 @@
       loadRSSList();
     } catch (err) {
       setRSSStatus("削除でエラーが発生しました: " + err.message, true);
-    }
-  }
-
-  async function saveTitle(url, title) {
-    try {
-      const res = await fetch("/api/rss/title", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, title }),
-      });
-      const result = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setRSSStatus("フィード名の保存に失敗しました: " + (result.error || res.status), true);
-        return;
-      }
-      setRSSStatus("フィード名を保存しました。", false);
-    } catch (err) {
-      setRSSStatus("保存でエラーが発生しました: " + err.message, true);
     }
   }
 
