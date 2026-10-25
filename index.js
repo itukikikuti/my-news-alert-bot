@@ -12,7 +12,7 @@ import {
 } from "./lib.js";
 import { sendFcmNotification, isFcmEnabled } from "./fcm.js";
 import { fetchArticleText } from "./article.js";
-import { shouldNotify } from "./ai-filter.js";
+import { shouldNotifyCombined } from "./ai-filter.js";
 
 const parser = new Parser();
 
@@ -104,9 +104,10 @@ async function checkAndNotify() {
         // Ask the LLM whether this article should be notified at all.
         // No prompt means no API call: notify every updated entry.
         // Fail-open: a disabled or failing filter still notifies.
-        const decision = await shouldNotify({
+        const decision = await shouldNotifyCombined({
           title,
           body: articleText || undefined,
+          link,
           feedPrompt,
         });
         if (!decision.notify) {
