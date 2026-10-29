@@ -123,50 +123,188 @@ export async function shouldNotify({ title, body, feedPrompt }) {
     clearTimeout(timeout);
   }
 }
+import fs from "node:fs/promises";
+import path from "node:path";
+
 const IRIS_BASE_URL = (process.env.IRIS_URL || "http://10.0.0.99:3170").replace(/\/$/, "");
 const IRIS_TIMEOUT_MS = 120000;
+const IRIS_ROTATE_TURNS = 40;
+const IRIS_ROTATE_TRANSCRIPT_CHARS = 64000;
+const IRIS_SESSION_FILE = process.env.IRIS_SESSION_FILE || path.join(path.dirname(process.env.STATE_FILE || "/data/state.json"), "iris-session.json");
+const IRIS_INSTRUCTIONS = `あなたはニュース通知判定専用です。このセッションでは記事を1件ずつ受け取ります。各記事の先頭にある番号を必ず保ち、その記事の通知可否を「番号: YES」または「番号: NO」の形式で1行回答してください。理由が必要なら同じ行に短く添えてください。本文が無ければURLを開いて確かめてよいです。判定は必ずYESかNO、理由は1行にしてください。判定に迷った場合は通知する側（YES）にしてください。`;
 
 export function getFilterMode() {
   const mode = (process.env.AI_FILTER_MODE || "hybrid").toLowerCase();
   return ["gpt-oss", "iris", "hybrid"].includes(mode) ? mode : "hybrid";
 }
 
-export async function shouldNotifyViaIris({ title, body, link, feedPrompt }) {
-  const articleBody = body ? body.slice(0, BODY_EXCERPT_CHARS) : "(本文なし)";
-  const rule = feedPrompt?.trim() ? `\nフィード通知ルール: ${feedPrompt.trim()}\n` : "";
-  const message = `次の記事を通知すべきか。YES か NO だけ答える。理由は1行。${rule}\nタイトル: ${title}\nURL: ${link || ""}\n本文: ${articleBody}`;
+function irisHeaders() {
   const headers = { "Content-Type": "application/json" };
   if (process.env.IRIS_TOKEN) headers["x-iris-token"] = process.env.IRIS_TOKEN;
+  return headers;
+}
+
+function withTimeout() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), IRIS_TIMEOUT_MS);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
+async function readSessionPointer() {
   try {
-    const create = await fetch(`${IRIS_BASE_URL}/api/sessions`, {
-      method: "POST", headers, signal: controller.signal,
-      body: JSON.stringify({ title: `News alert: ${title}`.slice(0, 200), message, ...(process.env.IRIS_MODEL_ID ? { modelId: process.env.IRIS_MODEL_ID } : {}) }),
-    });
-    if (!create.ok) throw new Error(`session creation HTTP ${create.status}`);
-    const { id } = await create.json();
-    if (typeof id !== "string" || !id) throw new Error("invalid session id");
-    const deadline = Date.now() + IRIS_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const stateRes = await fetch(`${IRIS_BASE_URL}/api/state`, { headers, signal: controller.signal });
-      if (!stateRes.ok) throw new Error(`state HTTP ${stateRes.status}`);
-      const state = await stateRes.json();
-      const result = (state.results || []).find((r) => r.sessionId === id);
-      if (result) {
-        const rawReply = String(result.body || "");
-        const match = rawReply.trim().match(/^\s*(YES|NO)\b/i);
-        if (!match) return { notify: true, reason: "iris応答を解釈できず通知", rawReply, error: "unparseable" };
-        return { notify: match[1].toUpperCase() === "YES", reason: rawReply.trim().split(/\r?\n/, 1)[0].slice(0, 100), rawReply, resultKind: result.kind };
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-    throw new Error("timeout");
-  } catch (e) {
-    console.warn(`[IRIS] Filter failed, notifying anyway: ${e.name === "AbortError" ? "timeout" : e.message}`);
-    return { notify: true, error: e.name === "AbortError" ? "timeout" : e.message, reason: "iris判定失敗のため通知" };
+    return JSON.parse(await fs.readFile(IRIS_SESSION_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function saveSessionPointer(pointer) {
+  await fs.mkdir(path.dirname(IRIS_SESSION_FILE), { recursive: true });
+  const temporary = `${IRIS_SESSION_FILE}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify(pointer, null, 2), { mode: 0o600 });
+  await fs.rename(temporary, IRIS_SESSION_FILE);
+}
+
+async function irisRequest(url, init = {}) {
+  const timeout = withTimeout();
+  try {
+    return await fetch(url, { ...init, signal: timeout.signal });
   } finally {
-    clearTimeout(timer);
+    timeout.clear();
+  }
+}
+
+async function getIrisState() {
+  const response = await irisRequest(`${IRIS_BASE_URL}/api/state`, { headers: irisHeaders() });
+  if (!response.ok) throw new Error(`iris state HTTP ${response.status}`);
+  return response.json();
+}
+
+function findSession(state, id) {
+  return (state.sessions || []).find((session) => session.id === id);
+}
+
+async function waitUntilIdle(id, deadline) {
+  while (Date.now() < deadline) {
+    const state = await getIrisState();
+    const session = findSession(state, id);
+    if (!session) return null;
+    if (session.status === "error") return null;
+    if (session.status !== "running" && !(session.queue || []).length) return { state, session };
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error("iris session busy timeout");
+}
+
+async function waitForResult(id, expectedTurn, articleNumber, deadline) {
+  while (Date.now() < deadline) {
+    const state = await getIrisState();
+    const session = findSession(state, id);
+    if (!session) throw new Error("iris session disappeared");
+    if (session.status === "error") throw new Error("iris session returned an execution error");
+    const result = (state.results || []).find((item) => item.sessionId === id);
+    if (session.status !== "running" && !(session.queue || []).length && result?.turn >= expectedTurn) {
+      return result;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(`iris article ${articleNumber} timeout`);
+}
+
+async function createJudgeSession() {
+  const response = await irisRequest(`${IRIS_BASE_URL}/api/sessions`, {
+    method: "POST",
+    headers: irisHeaders(),
+    body: JSON.stringify({
+      title: "通知判定",
+      message: IRIS_INSTRUCTIONS,
+      ...(process.env.IRIS_MODEL_ID ? { modelId: process.env.IRIS_MODEL_ID } : {}),
+    }),
+  });
+  if (!response.ok) throw new Error(`iris session creation HTTP ${response.status}`);
+  const { id } = await response.json();
+  if (typeof id !== "string" || !id) throw new Error("iris returned an invalid session id");
+  const pointer = { id, nextArticleNumber: 1 };
+  await saveSessionPointer(pointer);
+  await waitForResult(id, 1, "setup", Date.now() + IRIS_TIMEOUT_MS);
+  console.log("[IRIS] Created persistent judge session: 通知判定");
+  return pointer;
+}
+
+async function shouldRotateSession(id, session, state) {
+  if (session.turns >= IRIS_ROTATE_TURNS) return true;
+  try {
+    const response = await irisRequest(`${IRIS_BASE_URL}/api/sessions/${encodeURIComponent(id)}/transcript`, { headers: irisHeaders() });
+    if (!response.ok) return response.status === 404;
+    const transcript = await response.json();
+    const serialized = JSON.stringify(transcript);
+    const compressed = (transcript.turns || []).some((turn) =>
+      (turn.events || []).some((event) =>
+        event.type === "system" && /^(compact_boundary|compaction|compact)$/i.test(event.subtype || ""),
+      ),
+    );
+    return serialized.length >= IRIS_ROTATE_TRANSCRIPT_CHARS || compressed;
+  } catch {
+    // State and article requests remain authoritative; rotate on conservative turn/size thresholds.
+    return false;
+  }
+}
+
+function parseNumberedDecision(text, number) {
+  const line = String(text ?? "").split(/\r?\n/).find((row) => {
+    const match = row.match(/^\s*(\d+)\s*[:：]\s*(YES|NO)\b/i);
+    return match && Number(match[1]) === number;
+  });
+  if (!line) return null;
+  const match = line.match(/^\s*(\d+)\s*[:：]\s*(YES|NO)\b/i);
+  return { notify: match[2].toUpperCase() === "YES", reason: line.trim().slice(0, 100) };
+}
+
+export async function shouldNotifyViaIris({ title, body, link, feedPrompt }) {
+  try {
+    let pointer = await readSessionPointer();
+    let idle = pointer?.id ? await waitUntilIdle(pointer.id, Date.now() + IRIS_TIMEOUT_MS) : null;
+    if (!idle) {
+      if (pointer?.id) console.log("[IRIS] Persistent judge session missing or errored; creating a replacement");
+      pointer = await createJudgeSession();
+      idle = await waitUntilIdle(pointer.id, Date.now() + IRIS_TIMEOUT_MS);
+    }
+    if (await shouldRotateSession(pointer.id, idle.session, idle.state)) {
+      console.log(`[IRIS] Rotating persistent judge session after ${idle.session.turns} turns or large history`);
+      pointer = await createJudgeSession();
+      idle = await waitUntilIdle(pointer.id, Date.now() + IRIS_TIMEOUT_MS);
+    }
+
+    const articleNumber = Number(pointer.nextArticleNumber) || 1;
+    pointer.nextArticleNumber = articleNumber + 1;
+    await saveSessionPointer(pointer);
+    const articleBody = body ? body.slice(0, BODY_EXCERPT_CHARS) : "(本文なし)";
+    const rule = feedPrompt?.trim() ? `\n通知ルール: ${feedPrompt.trim()}` : "";
+    const text = `[${articleNumber}] ${title}\nURL: ${link || ""}${rule}\n本文: ${articleBody}`;
+    const expectedTurn = idle.session.turns + 1;
+    const response = await irisRequest(`${IRIS_BASE_URL}/api/sessions/${encodeURIComponent(pointer.id)}/message`, {
+      method: "POST",
+      headers: irisHeaders(),
+      body: JSON.stringify({ text }),
+    });
+    if (response.status === 404) {
+      await fs.rm(IRIS_SESSION_FILE, { force: true });
+      return shouldNotifyViaIris({ title, body, link, feedPrompt });
+    }
+    if (!response.ok) throw new Error(`iris message HTTP ${response.status}`);
+    await response.json();
+
+    const result = await waitForResult(pointer.id, expectedTurn, articleNumber, Date.now() + IRIS_TIMEOUT_MS);
+    const rawReply = String(result.body || "");
+    const decision = parseNumberedDecision(rawReply, articleNumber);
+    if (!decision) {
+      console.warn(`[IRIS] Missing numbered answer for article ${articleNumber}; fail-open`);
+      return { notify: true, reason: "iris番号付き判定を解釈できず通知", rawReply, error: "unparseable" };
+    }
+    return { ...decision, rawReply, resultKind: result.kind, articleNumber };
+  } catch (error) {
+    console.warn(`[IRIS] Persistent judge failed, notifying anyway: ${error.name === "AbortError" ? "timeout" : error.message}`);
+    return { notify: true, error: error.name === "AbortError" ? "timeout" : error.message, reason: "iris判定失敗のため通知" };
   }
 }
 
