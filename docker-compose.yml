@@ -8,7 +8,7 @@ services:
     environment:
       - STATE_FILE=/data/state.json
       - IRIS_URL=${IRIS_URL:-http://10.0.0.99:3170}
-      - AI_FILTER_MODE=${AI_FILTER_MODE:-hybrid}
+      - AI_FILTER_MODE=${AI_FILTER_MODE:-iris}
     ports:
       - "${GUI_PORT:-3334}:${GUI_PORT:-3334}"
     volumes:

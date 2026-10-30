@@ -109,7 +109,15 @@ async function checkAndNotify() {
           body: articleText || undefined,
           link,
           feedPrompt,
+          entryKey,
         });
+        if (decision.deferred) {
+          // iris could not judge right now (busy, unreachable, no reply yet).
+          // Leave the entry unseen so the next run judges it again.
+          console.log(`[AI-DEFER] ${title} — ${decision.reason || ""}`);
+          seenKeys.delete(entryKey);
+          continue;
+        }
         if (!decision.notify) {
           console.log(`[AI-SKIP] ${title} — ${decision.reason || ""}`);
           // Keep the skipped article visible in the admin UI, with the prompt
