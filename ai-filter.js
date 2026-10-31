@@ -272,7 +272,7 @@ const IRIS_SETUP_MESSAGE = `あなたはニュース通知ボットの判定専�
 いまは準備の確認です。submit_result（kind: done）で「READY」とだけ出してください。`;
 
 // Kept by "/compact": the YES list is what duplicate suppression relies on.
-const IRIS_COMPACT_INSTRUCTIONS = "要約には次のことだけを残してください: (1) このセッションはニュース通知ボットの判定専用で、記事はサブエージェント（Agent ツール）にURLを開かせて確認し、回答は記事IDごとに1行（YES/NO と短い理由）を submit_result（kind: done）で出すこと。(2) これまでに YES にした記事の一覧を必ず全件残すこと（1件1行: 出来事（何・いつ・どこ）/ 判定日 / タイトル）。同じ出来事の記事を以後 NO にするために使います。NO にした記事・ツールの失敗例・その他のやり取りは要約に含めないでください。";
+const IRIS_COMPACT_INSTRUCTIONS = "要約には次のことだけを残してください: (1) このセッションはニュース通知ボットの判定専用で、記事はサブエージェント（Agent ツール）にURLを開かせて確認し、回答は記事IDごとに1行（YES/NO と短い理由）を submit_result（kind: done）で出すこと。(2) これまでに YES にした記事の一覧を必ず全件残すこと（「YES 済みとして扱う」と伝えられた記事も含む。1件1行: 出来事（何・いつ・どこ）/ 判定日 / タイトル。判定日が14日より前のものだけは省いてよい。同じ出来事は1行にまとめてよい）。同じ出来事の記事を以後 NO にするために使います。NO にした記事・ツールの失敗例・その他のやり取りは要約に含めないでください。";
 
 // Articles per judgment message; the subagents of one message run in parallel.
 const IRIS_BATCH_SIZE = Math.min(Math.max(envMs("IRIS_BATCH_SIZE", 5), 1), 9);
