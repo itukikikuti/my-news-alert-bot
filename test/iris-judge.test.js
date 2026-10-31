@@ -91,8 +91,7 @@ function startIrisMock({ answer, delayMs = 20 } = {}) {
 
 // Articles of one message, as [{ id, title, url }].
 function articlesOf(text) {
-  const section = (text.split("# 判定対象の記事")[1] || "").split("# 手順")[0];
-  return [...section.matchAll(/\[(REQ-[A-Z0-9]+-[A-F0-9]+-\d+)\]\nタイトル: (.*)\nURL: (.*)/g)].map((m) => ({ id: m[1], title: m[2], url: m[3] }));
+  return [...text.matchAll(/^\[(REQ-[A-Z0-9]+-[A-F0-9]+-\d+)\] (.*)\n(.*)$/gm)].map((m) => ({ id: m[1], title: m[2], url: m[3] }));
 }
 
 function defaultAnswer(text) {
@@ -151,13 +150,14 @@ test("reuses the saved session and matches the reply by request id", async () =>
     assert.equal(b.notify, false);
     assert.equal(mock.created.length, 0, "no new session");
     assert.equal(mock.messages.length, 2);
-    assert.match(mock.messages[0], /このメッセージのルールと記事だけで判定/);
-    assert.match(mock.messages[0], new RegExp(rule));
-    assert.match(mock.messages[0], /URL: https:\/\/a/);
+    assert.match(mock.messages[0], new RegExp(`ルール: ${rule}`));
+    assert.match(mock.messages[0], /\] 俵万智さんがテレビ出演\nhttps:\/\/a$/m);
+    assert.match(mock.messages[0], /以前 YES にした出来事と同じなら NO/);
+    assert.ok(mock.messages[0].length < 700, `short message (${mock.messages[0].length})`);
     assert.equal(mock.messages[0].includes("本文は送らない"), false, "no article body is sent");
     assert.equal(mock.messages[0].includes("本文:"), false);
     assert.match(mock.messages[0], /Agent ツール/);
-    assert.match(mock.messages[0], /自分では使わない/);
+    assert.match(mock.messages[0], /自分で開かず/);
     assert.match(mock.messages[0], /run_in_background: false/);
     const pointer = JSON.parse(await fs.readFile(path.join(dir, "iris-session.json"), "utf8"));
     assert.equal(pointer.id, "fixed-1");
@@ -318,56 +318,13 @@ test("compacts the same session in place once the context passes the threshold",
     assert.equal(b.notify, true);
     assert.equal(mock.messages.length, 3);
     assert.match(mock.messages[0], /^\/compact \[COMPACT-REQ-/);
-    assert.match(mock.messages[1], /通知判定リクエスト/);
+    assert.match(mock.messages[1], /【通知判定 REQ-/);
+    assert.match(mock.messages[0], /YES にした記事の一覧を必ず全件残す/);
     assert.equal(mock.created.length, 0);
     const pointer = JSON.parse(await fs.readFile(file, "utf8"));
     assert.equal(pointer.id, "fixed-1");
     assert.equal(pointer.compactions, 1);
     assert.equal(pointer.lastContextTokens, 31000);
-  });
-});
-
-test("includes recent notified headlines from history, but not skipped or old ones", async () => {
-  const mock = await startIrisMock();
-  seedSession(mock);
-  await withJudge(mock, {}, async (mod, dir) => {
-    await fs.writeFile(path.join(dir, "iris-session.json"), JSON.stringify({ id: "fixed-1" }));
-    const now = new Date().toISOString();
-    await fs.writeFile(
-      path.join(dir, "history.json"),
-      JSON.stringify([
-        { title: "ことばの音楽会 千秋楽の記事", notified: true, sentAt: now, entryKey: "h1" },
-        { title: "通知していない記事", notified: false, sentAt: now, entryKey: "h2" },
-        { title: "古すぎる通知", notified: true, sentAt: "2020-01-01T00:00:00Z", entryKey: "h3" },
-      ]),
-    );
-    await mod.shouldNotifyViaIris({ title: "無関係な記事", body: "台風", feedPrompt: rule, entryKey: "x" });
-    const message = mock.messages[0];
-    assert.match(message, /# 直近に通知した記事/);
-    assert.match(message, /ことばの音楽会 千秋楽の記事/);
-    assert.equal(message.includes("通知していない記事"), false);
-    assert.equal(message.includes("古すぎる通知"), false);
-    assert.match(message, /通知しないでください/);
-  });
-});
-
-test("a twin article notified earlier in the same run is not notified again", async () => {
-  const mock = await startIrisMock({
-    answer: (text) => {
-      const recent = text.split("# 直近に通知した記事")[1]?.split("# 判定対象の記事")[0] || "";
-      return articlesOf(text).map((a) => `${a.id}: ${recent.includes(a.title) ? "NO" : "YES"} | 重複チェック`).join("\n");
-    },
-  });
-  seedSession(mock);
-  await withJudge(mock, {}, async (mod, dir) => {
-    await fs.writeFile(path.join(dir, "iris-session.json"), JSON.stringify({ id: "fixed-1" }));
-    const first = await mod.shouldNotifyCombined({ title: "秋吉久美子が俵万智の短歌を朗読", body: "俵万智", feedPrompt: rule, entryKey: "e1" });
-    const twin = await mod.shouldNotifyCombined({ title: "秋吉久美子が俵万智の短歌を朗読", body: "俵万智", feedPrompt: rule, entryKey: "e2" });
-    const other = await mod.shouldNotifyCombined({ title: "春画展の音声ガイドを俵万智が担当", body: "俵万智", feedPrompt: rule, entryKey: "e3" });
-    assert.equal(first.notify, true);
-    assert.equal(twin.notify, false, "the same headline notified in this run is suppressed");
-    assert.equal(other.notify, true, "a different event still notifies");
-    assert.match(mock.messages[1], /秋吉久美子が俵万智の短歌を朗読/);
   });
 });
 
@@ -385,14 +342,14 @@ test("a batch is sent as one message with title+URL only and answered per articl
     assert.deepEqual(ds.map((d) => d.notify), [true, false, true]);
     assert.equal(mock.messages.length, 1);
     assert.equal(articlesOf(mock.messages[0]).length, 3);
-    assert.match(mock.messages[0], /並列に走らせる/);
-    assert.match(mock.messages[0], /YESにするのは最初の1件だけ/);
+    assert.match(mock.messages[0], /並列/);
+    assert.match(mock.messages[0], /YES は1件だけ/);
     const pointer = JSON.parse(await fs.readFile(path.join(dir, "iris-session.json"), "utf8"));
     assert.equal(pointer.judgments, 3);
   });
 });
 
-test("batches are split by IRIS_BATCH_SIZE and earlier YES headlines feed the next batch", async () => {
+test("batches are split by IRIS_BATCH_SIZE", async () => {
   const mock = await startIrisMock();
   seedSession(mock);
   await withJudge(mock, { IRIS_BATCH_SIZE: "2" }, async (mod, dir) => {
@@ -401,7 +358,8 @@ test("batches are split by IRIS_BATCH_SIZE and earlier YES headlines feed the ne
     const ds = await mod.shouldNotifyBatchViaIris({ articles, feedPrompt: rule });
     assert.deepEqual(ds.map((d) => d.notify), [true, false, false]);
     assert.equal(mock.messages.length, 2);
-    assert.match(mock.messages[1].split("# 判定対象の記事")[0], /俵万智A/);
+    assert.equal(mock.messages[0].includes("俵万智A"), true);
+    assert.equal(mock.messages[1].includes("俵万智A"), false, "no headline list in later messages");
   });
 });
 
@@ -436,6 +394,7 @@ test("subagent model: haiku on Claude sessions, inherited on Ollama sessions", a
     await fs.writeFile(path.join(dir, "iris-session.json"), JSON.stringify({ id: "fixed-1" }));
     await mod.shouldNotifyViaIris({ title: "台風", link: "https://t", feedPrompt: rule });
     assert.match(mock.messages[0], /model は指定しない/);
+    assert.equal(mock.messages[0].includes("haiku"), false);
     process.env.IRIS_SUBAGENT_MODEL = "haiku";
     try {
       assert.equal(await mod.subagentModelFor("ollama-x"), "haiku");
@@ -445,12 +404,15 @@ test("subagent model: haiku on Claude sessions, inherited on Ollama sessions", a
   });
 });
 
-test("long headline lists are trimmed to stay under the iris message limit", async () => {
+
+test("iris messages carry no recent-headline list even when history has notified articles", async () => {
   const mock = await startIrisMock();
-  await withJudge(mock, {}, async (mod) => {
-    const recentHeadlines = Array.from({ length: 40 }, (_, i) => ({ title: `${"長い見出し".repeat(30)}${i}`, sentAt: new Date().toISOString() }));
-    const text = mod.buildIrisMessage({ requestId: "REQ-A-1", articles: [{ title: "t", link: "https://t" }], feedPrompt: rule, recentHeadlines });
-    assert.ok(text.length <= 7800, `length ${text.length}`);
-    assert.match(text, /長い見出し/);
+  seedSession(mock);
+  await withJudge(mock, {}, async (mod, dir) => {
+    await fs.writeFile(path.join(dir, "iris-session.json"), JSON.stringify({ id: "fixed-1" }));
+    await fs.writeFile(path.join(dir, "history.json"), JSON.stringify([{ title: "ことばの音楽会 千秋楽の記事", notified: true, sentAt: new Date().toISOString(), entryKey: "h1" }]));
+    await mod.shouldNotifyViaIris({ title: "無関係な記事", link: "https://x", feedPrompt: rule, entryKey: "x" });
+    assert.equal(mock.messages[0].includes("ことばの音楽会"), false);
+    assert.equal(mock.messages[0].includes("直近に通知"), false);
   });
 });

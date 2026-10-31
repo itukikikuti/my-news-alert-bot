@@ -143,12 +143,15 @@ export async function shouldNotify({ title, body, feedPrompt, entryKey }) {
 //   - A new session is created only when the saved one is gone (404) or broken
 //     (several judgment turns in a row ended in an error). Creation is rate
 //     limited so an outage cannot flood the iris session list again.
-//   - Each message carries only the title and URL of up to IRIS_BATCH_SIZE
-//     articles (no body). The judge must not open the URLs itself: it starts one
-//     subagent (Agent tool) per article, which reads the page and reports back
-//     in two lines, so the judge session's own context grows only by that.
-//   - Each message is self-contained (full rule + recent headlines + format)
-//     and carries a unique request id (articles: "<id>-1", "<id>-2", ...); the reply is accepted only from the turn whose input contains
+//   - Each message carries a few lines of rules plus only the title and URL of
+//     up to IRIS_BATCH_SIZE articles (no body, no headline list). The judge
+//     must not open the URLs itself: it starts one subagent (Agent tool) per
+//     article, which reads the page and reports back in two lines.
+//   - Duplicate suppression relies on the session itself: it remembers the
+//     events it answered YES to. "/compact" is told to keep that YES list, but
+//     a replaced session starts with no memory.
+//   - Each message carries a unique request id (articles: "<id>-1", "<id>-2",
+//     ...); the reply is accepted only from the turn whose input contains
 //     that id and only if the answer line repeats the id. A late reply to an
 //     earlier article can therefore never be taken for the current one.
 //   - <data>/iris-judge.lock serialises judges across processes (cron, manual
@@ -188,9 +191,9 @@ const IRIS_MAX_DEFERRALS = 5;
 // generic summary that keeps earlier articles. 0 disables.
 const IRIS_COMPACT_AT_TOKENS = Number(process.env.IRIS_COMPACT_AT_TOKENS ?? 60000);
 
-// Duplicate suppression: every judgment message carries the headlines that were
+// Duplicate suppression for the gpt-oss judge: its prompt carries the headlines
 // already notified (from history.json plus the articles notified earlier in this
-// same run), so "the same event from another outlet / an X post" is not sent again.
+// same run). The iris judge gets no such list; it remembers its own YES answers.
 const IRIS_RECENT_HEADLINES = envMs("IRIS_RECENT_HEADLINES", 40);
 const IRIS_RECENT_WINDOW_MS = envMs("IRIS_RECENT_WINDOW_MS", 7 * 24 * 60 * 60 * 1000);
 
@@ -262,20 +265,17 @@ function buildRecentHeadlinesSection(recentHeadlines) {
 ${lines}`;
 }
 
-const IRIS_SETUP_MESSAGE = `あなたはニュース通知ボットの判定専用セッションです。これから「通知判定リクエスト」が届きます。1通に1〜数件の記事（タイトルとURLだけ）が入っています。
-- 各リクエストは独立しています。以前に届いた記事・判定・やり取りは参照せず、そのメッセージに書かれたルールと記事だけで判定してください。
-- ただし、各メッセージに添えられた「直近に通知した記事」は、重複通知を避けるためだけに使ってください。
-- 記事の中身は自分で開かず（WebFetch や curl を自分では使わない）、メッセージの指示どおりサブエージェント（Agent ツール）に記事URLを開かせて短く報告させてください。このセッションのコンテキストを増やさないためです。
-- 回答はメッセージの指示どおり、記事IDを付けた1行ずつ（YES または NO と短い理由）を submit_result（kind: done）で出してください。
+const IRIS_SETUP_MESSAGE = `あなたはニュース通知ボットの判定専用セッションです。これから「通知判定」が届きます（1通に記事1〜数件、タイトルとURLだけ）。
+- 記事は自分で開かず、サブエージェント（Agent ツール）にURLを開かせて確認してください。
+- 重複を避けるため、このセッションで YES にした記事の出来事を覚えておき、同じ出来事の記事は NO にしてください。
+- 回答は記事IDごとに1行（YES/NO と短い理由）を submit_result（kind: done）で出してください。
 いまは準備の確認です。submit_result（kind: done）で「READY」とだけ出してください。`;
 
-const IRIS_COMPACT_INSTRUCTIONS = "要約には次のことだけを残してください: このセッションはニュース通知ボットの判定専用であること、各「通知判定リクエスト」は独立していて以前の記事・判定を参照しないこと、記事の中身は自分で開かずサブエージェント（Agent ツール）に記事URLを開かせて短く報告させること、回答は記事IDを付けた1行ずつ（YES/NO と短い理由）を submit_result（kind: done）で出すこと。これまでに届いた個々の記事の内容・タイトル・URL・判定結果・判定の傾向や方針の学び・ツールの失敗例は要約に一切含めないでください。";
+// Kept by "/compact": the YES list is what duplicate suppression relies on.
+const IRIS_COMPACT_INSTRUCTIONS = "要約には次のことだけを残してください: (1) このセッションはニュース通知ボットの判定専用で、記事はサブエージェント（Agent ツール）にURLを開かせて確認し、回答は記事IDごとに1行（YES/NO と短い理由）を submit_result（kind: done）で出すこと。(2) これまでに YES にした記事の一覧を必ず全件残すこと（1件1行: 出来事（何・いつ・どこ）/ 判定日 / タイトル）。同じ出来事の記事を以後 NO にするために使います。NO にした記事・ツールの失敗例・その他のやり取りは要約に含めないでください。";
 
-// Articles per judgment message. The rule and the recent-headline list are sent
-// once per message, and the subagents of one message run in parallel.
+// Articles per judgment message; the subagents of one message run in parallel.
 const IRIS_BATCH_SIZE = Math.min(Math.max(envMs("IRIS_BATCH_SIZE", 5), 1), 9);
-// iris rejects messages longer than 8000 characters.
-const IRIS_MAX_MESSAGE_CHARS = 7800;
 
 export function getFilterMode() {
   const mode = (process.env.AI_FILTER_MODE || "hybrid").toLowerCase();
@@ -511,52 +511,23 @@ export async function subagentModelFor(modelId) {
 /** Article ids inside one message: "<requestId>-1", "<requestId>-2", ... */
 export const articleId = (requestId, index) => `${requestId}-${index + 1}`;
 
-function buildIrisMessageWith({ requestId, articles, feedPrompt, recentHeadlines, subagentModel }) {
-  const list = articles
-    .map((article, index) => `[${articleId(requestId, index)}]
-タイトル: ${article.title}
-URL: ${article.link || "(なし)"}`)
-    .join("\n\n");
+function buildIrisMessageWith({ requestId, articles, feedPrompt, subagentModel }) {
   const many = articles.length > 1;
-  const modelArg = subagentModel
-    ? `model: "${subagentModel}"`
-    : "model は指定しない（このセッションのモデルを使う。haiku 等はこの環境では使えない）";
-  return `【通知判定リクエスト ${requestId}】
-独立した判定です。以前に届いた記事・判定は参照せず、このメッセージのルールと記事だけで判定してください。「直近に通知した記事」は重複の判断にだけ使います。
-
-# このフィードの通知ルール
-${feedPrompt.trim()}
-
-${buildRecentHeadlinesSection(recentHeadlines)}
-
-# 判定対象の記事（${articles.length}件。タイトルとURLだけです）
-${list}
-
-# 手順
-1. 記事は自分で開かない（WebFetch・curl・Bash・Monitor を自分では使わない）。URLのある記事ごとに Agent ツールを subagent_type: "general-purpose", run_in_background: false, ${modelArg} で呼ぶ。${many ? "全記事分を1回の応答でまとめて呼び、並列に走らせる。" : ""}
-   prompt:「<URL> の記事を開いて読み（WebFetchで開けなければcurl）、次の2行だけ返す。submit_resultは使わない。1行目: 通知ルール「${feedPrompt.trim().replace(/\s+/g, " ").slice(0, 200)}」に当たる、本人についての新しい情報（出演・参加・発言・寄稿など）か: はい/いいえ（種類） 2行目: 記事が扱う出来事（何・いつ・どこ）を一言で」
-2. 全サブエージェントの報告がそろってから判定する。開けなかった記事・URLの無い記事はタイトルで判定。
-
-# 判定基準
-1. 「通知ルール」に沿っているか。ルールが除外を指示している内容なら通知しない。
-2. 「直近に通知した記事」と同じ出来事（同じ公演・イベント・ニュースの別媒体の記事、X/ソーシャル投稿、実質同じ内容の続報）なら NO。新しい事実（日程変更、新たな出演者、公演の追加など）が明確に加わっている場合だけYES。${many ? "\n3. 今回の記事どうしが同じ出来事なら、YESにするのは最初の1件だけ。" : ""}
-${many ? "4" : "3"}. 迷ったら YES。ただし重複の判断が優先。
-
-# 回答方法
-submit_result（kind: done）を1回だけ呼び、記事ごとに1行（${articles.length}行）。記事IDをそのまま行頭に書く:
-${articles.map((_, index) => `${articleId(requestId, index)}: YES または NO | <30文字以内の理由>`).join("\n")}`;
+  const rule = feedPrompt.trim().replace(/\s+/g, " ");
+  const modelArg = subagentModel ? `, model: "${subagentModel}"` : "、model は指定しない";
+  const list = articles
+    .map((article, index) => `[${articleId(requestId, index)}] ${article.title}\n${article.link || "(URLなし)"}`)
+    .join("\n");
+  return `【通知判定 ${requestId}】
+ルール: ${rule}
+- 記事は自分で開かず、URLごとに Agent ツール（subagent_type: "general-purpose", run_in_background: false${modelArg}）で確認させる${many ? "（全件まとめて並列に）" : ""}。依頼文:「<URL> を開き（WebFetch不可ならcurl）、2行で返す。submit_resultは使わない。1) ルール『${rule}』に当たる本人の新情報（出演・参加・発言など）か はい/いいえ 2) 何の出来事か（何・いつ・どこ）」
+- このセッションで以前 YES にした出来事と同じなら NO${many ? "（今回の記事どうしが同じ出来事なら YES は1件だけ）" : ""}。迷ったら YES。
+- 報告がそろったら submit_result（kind: done）で1記事1行:「<ID>: YES|NO | 理由」
+${list}`;
 }
 
-export function buildIrisMessage({ requestId, articles, title, link, feedPrompt, recentHeadlines = [], subagentModel = "" }) {
-  const list = articles || [{ title, link }];
-  // Stay under iris' message size limit: drop the oldest headlines first.
-  let headlines = recentHeadlines;
-  let text = buildIrisMessageWith({ requestId, articles: list, feedPrompt, recentHeadlines: headlines, subagentModel });
-  while (text.length > IRIS_MAX_MESSAGE_CHARS && headlines.length > 0) {
-    headlines = headlines.slice(0, -1);
-    text = buildIrisMessageWith({ requestId, articles: list, feedPrompt, recentHeadlines: headlines, subagentModel });
-  }
-  return text;
+export function buildIrisMessage({ requestId, articles, title, link, feedPrompt, subagentModel = "" }) {
+  return buildIrisMessageWith({ requestId, articles: articles || [{ title, link }], feedPrompt, subagentModel });
 }
 
 /** Wait until the session has no running turn and nothing queued. */
@@ -772,8 +743,7 @@ export async function shouldNotifyBatchViaIris({ articles, feedPrompt }) {
     try {
       await acquireLock();
       locked = true;
-      const recentHeadlines = await loadRecentNotifiedHeadlines({ excludeKey: chunk.length === 1 ? articleKey(chunk[0]) : undefined });
-      const outcome = await judgeOnce({ articles: chunk.map(({ title, link }) => ({ title, link })), feedPrompt, recentHeadlines });
+      const outcome = await judgeOnce({ articles: chunk.map(({ title, link }) => ({ title, link })), feedPrompt });
       for (let i = 0; i < chunk.length; i++) {
         const key = articleKey(chunk[i]);
         const decision = outcome.decisions[i];
