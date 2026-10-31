@@ -143,8 +143,12 @@ export async function shouldNotify({ title, body, feedPrompt, entryKey }) {
 //   - A new session is created only when the saved one is gone (404) or broken
 //     (several judgment turns in a row ended in an error). Creation is rate
 //     limited so an outage cannot flood the iris session list again.
-//   - Each message is self-contained (full rule + format) and carries a unique
-//     request id; the reply is accepted only from the turn whose input contains
+//   - Each message carries only the title and URL of up to IRIS_BATCH_SIZE
+//     articles (no body). The judge must not open the URLs itself: it starts one
+//     subagent (Agent tool) per article, which reads the page and reports back
+//     in two lines, so the judge session's own context grows only by that.
+//   - Each message is self-contained (full rule + recent headlines + format)
+//     and carries a unique request id (articles: "<id>-1", "<id>-2", ...); the reply is accepted only from the turn whose input contains
 //     that id and only if the answer line repeats the id. A late reply to an
 //     earlier article can therefore never be taken for the current one.
 //   - <data>/iris-judge.lock serialises judges across processes (cron, manual
@@ -152,7 +156,8 @@ export async function shouldNotify({ title, body, feedPrompt, entryKey }) {
 //   - When iris is busy/unreachable the article is deferred (left unseen and
 //     retried next run) instead of being guessed; after IRIS_MAX_DEFERRALS
 //     retries it falls back to the old fail-open behaviour (notify).
-// The model is iris' work-session default: no modelId is ever sent.
+// The model is iris' work-session default; IRIS_MODEL_ID (unset by default)
+// only applies when a new judge session has to be created.
 // ---------------------------------------------------------------------------
 
 const IRIS_BASE_URL = (process.env.IRIS_URL || "http://10.0.0.99:3170").replace(/\/$/, "");
@@ -163,8 +168,8 @@ const IRIS_LOCK_FILE = process.env.IRIS_LOCK_FILE || path.join(DATA_DIR, "iris-j
 const IRIS_DEFER_FILE = process.env.IRIS_DEFER_FILE || path.join(DATA_DIR, "iris-deferrals.json");
 const envMs = (name, fallback) => Number(process.env[name]) || fallback;
 const IRIS_HTTP_TIMEOUT_MS = envMs("IRIS_HTTP_TIMEOUT_MS", 30000);
-// One judgment normally takes 3-6 s; an automatic compaction inside the turn or
-// opening the article URL can take minutes.
+// One message (subagents opening the articles in parallel) normally takes
+// 20-60 s; an automatic compaction inside the turn can take minutes.
 const IRIS_REPLY_TIMEOUT_MS = envMs("IRIS_REPLY_TIMEOUT_MS", 240000);
 const IRIS_IDLE_WAIT_MS = envMs("IRIS_IDLE_WAIT_MS", 90000);
 const IRIS_LOCK_WAIT_MS = envMs("IRIS_LOCK_WAIT_MS", 90000);
@@ -257,13 +262,20 @@ function buildRecentHeadlinesSection(recentHeadlines) {
 ${lines}`;
 }
 
-const IRIS_SETUP_MESSAGE = `あなたはニュース通知ボットの判定専用セッションです。これから「通知判定リクエスト」が1件ずつ届きます。
+const IRIS_SETUP_MESSAGE = `あなたはニュース通知ボットの判定専用セッションです。これから「通知判定リクエスト」が届きます。1通に1〜数件の記事（タイトルとURLだけ）が入っています。
 - 各リクエストは独立しています。以前に届いた記事・判定・やり取りは参照せず、そのメッセージに書かれたルールと記事だけで判定してください。
 - ただし、各メッセージに添えられた「直近に通知した記事」は、重複通知を避けるためだけに使ってください。
-- 回答はメッセージの指示どおり、リクエストIDを付けた1行（YES または NO と短い理由）を submit_result（kind: done）で出してください。
+- 記事の中身は自分で開かず（WebFetch や curl を自分では使わない）、メッセージの指示どおりサブエージェント（Agent ツール）に記事URLを開かせて短く報告させてください。このセッションのコンテキストを増やさないためです。
+- 回答はメッセージの指示どおり、記事IDを付けた1行ずつ（YES または NO と短い理由）を submit_result（kind: done）で出してください。
 いまは準備の確認です。submit_result（kind: done）で「READY」とだけ出してください。`;
 
-const IRIS_COMPACT_INSTRUCTIONS = "要約には次のことだけを残してください: このセッションはニュース通知ボットの判定専用であること、各「通知判定リクエスト」は独立していて以前の記事・判定を参照しないこと、回答はリクエストIDを付けた1行（YES/NO と短い理由）を submit_result（kind: done）で出すこと。これまでに届いた個々の記事の内容・タイトル・URL・判定結果・判定の傾向や方針の学び・ツールの失敗例は要約に一切含めないでください。";
+const IRIS_COMPACT_INSTRUCTIONS = "要約には次のことだけを残してください: このセッションはニュース通知ボットの判定専用であること、各「通知判定リクエスト」は独立していて以前の記事・判定を参照しないこと、記事の中身は自分で開かずサブエージェント（Agent ツール）に記事URLを開かせて短く報告させること、回答は記事IDを付けた1行ずつ（YES/NO と短い理由）を submit_result（kind: done）で出すこと。これまでに届いた個々の記事の内容・タイトル・URL・判定結果・判定の傾向や方針の学び・ツールの失敗例は要約に一切含めないでください。";
+
+// Articles per judgment message. The rule and the recent-headline list are sent
+// once per message, and the subagents of one message run in parallel.
+const IRIS_BATCH_SIZE = Math.min(Math.max(envMs("IRIS_BATCH_SIZE", 5), 1), 9);
+// iris rejects messages longer than 8000 characters.
+const IRIS_MAX_MESSAGE_CHARS = 7800;
 
 export function getFilterMode() {
   const mode = (process.env.AI_FILTER_MODE || "hybrid").toLowerCase();
@@ -393,28 +405,32 @@ async function getSessionView(id, fromTurn = 1e9) {
 const turnFinished = (session, turn) =>
   session.turns > turn || (session.turns === turn && session.status !== "running");
 
-/** Texts the model produced in one turn, oldest first: submit_result bodies and plain replies. */
+/**
+ * Texts the model produced in one turn: plain replies first, then submit_result
+ * bodies, so a submitted answer line wins over chatter such as "提出しました（ID: NO）".
+ */
 function answerTexts(turn) {
   const texts = [];
+  const submitted = [];
   for (const event of turn?.events || []) {
     if (event.type !== "assistant" || event.parent_tool_use_id) continue;
     const content = event.message?.content;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
       if (block?.type === "tool_use" && /submit_result$/.test(block.name || "") && typeof block.input?.body === "string") {
-        texts.push(block.input.body);
+        submitted.push(block.input.body);
       } else if (block?.type === "text" && block.text?.trim()) {
         texts.push(block.text);
       }
     }
   }
-  return texts;
+  return [...texts, ...submitted];
 }
 
 const usageTokens = (usage) =>
   (usage?.input_tokens || 0) + (usage?.cache_read_input_tokens || 0) + (usage?.cache_creation_input_tokens || 0);
 
-/** Largest single model call of the turn (= current conversation size), error flag, compaction info. */
+/** Largest single model call of the turn (= current conversation size), error flag, compaction info, subagent use. */
 function turnUsage(turn) {
   const events = turn?.events || [];
   const result = [...events].reverse().find((event) => event.type === "result");
@@ -422,11 +438,18 @@ function turnUsage(turn) {
     .filter((event) => event.type === "assistant" && !event.parent_tool_use_id && event.message?.usage)
     .map((event) => usageTokens(event.message.usage));
   const boundary = events.find((event) => event.type === "system" && event.subtype === "compact_boundary");
+  const mainTools = events
+    .filter((event) => event.type === "assistant" && !event.parent_tool_use_id)
+    .flatMap((event) => (Array.isArray(event.message?.content) ? event.message.content : []))
+    .filter((block) => block?.type === "tool_use")
+    .map((block) => block.name || "");
   return {
     isError: Boolean(result?.is_error),
     contextTokens: perCall.length ? Math.max(...perCall) : usageTokens(result?.usage),
     calls: perCall.length,
     compacted: boundary ? boundary.compact_metadata || {} : null,
+    subagents: mainTools.filter((name) => name === "Agent" || name === "Task").length,
+    selfFetches: mainTools.filter((name) => name === "WebFetch" || name === "Bash").length,
   };
 }
 
@@ -434,7 +457,8 @@ const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Find "<requestId>: YES|NO ..." in the turn's answers (last one wins). */
 export function parseIrisDecision(texts, requestId) {
-  const pattern = new RegExp(`${escapeRegExp(requestId)}\\s*[\\]】)]?\\s*[:：]?\\s*\\**\\s*(YES|NO)\\b(.*)`, "i");
+  // (?!\d) keeps "REQ-…-1" from matching the answer for "REQ-…-10".
+  const pattern = new RegExp(`${escapeRegExp(requestId)}(?!\\d)\\s*[\\]】)]?\\s*[:：]?\\s*\\**\\s*(YES|NO)\\b(.*)`, "i");
   for (const text of [...texts].reverse()) {
     const lines = String(text).split(/\r?\n/).reverse();
     for (const line of lines) {
@@ -452,31 +476,87 @@ function newRequestId() {
   return `REQ-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
-export function buildIrisMessage({ requestId, title, body, link, feedPrompt, recentHeadlines = [] }) {
-  const articleBody = body ? body.slice(0, BODY_EXCERPT_CHARS) : "(本文を取得できませんでした)";
+// ---- subagent model ------------------------------------------------------------
+// The judge never opens articles itself; a subagent (Agent tool) does. On a
+// Claude session the subagent runs on haiku. On an Ollama session "haiku" does
+// not exist (the Agent call fails with model_not_found), so no model is named
+// and the subagent inherits the session's (already light) Ollama model.
+// IRIS_SUBAGENT_MODEL forces a value; "inherit" means "do not name a model".
+
+let modelKindsCache = null;
+
+async function sessionModelKind(modelId) {
+  if (!modelId) return "";
+  if (!modelKindsCache) {
+    modelKindsCache = new Map();
+    try {
+      const response = await irisFetch("/api/settings");
+      if (response.ok) {
+        const settings = await response.json();
+        for (const model of settings?.models || []) modelKindsCache.set(model.id, model.kind);
+      }
+    } catch {
+      // Unknown kind: fall back to inheriting the session model.
+    }
+  }
+  return modelKindsCache.get(modelId) || "";
+}
+
+export async function subagentModelFor(modelId) {
+  const forced = (process.env.IRIS_SUBAGENT_MODEL || "").trim();
+  if (forced) return forced === "inherit" ? "" : forced;
+  return (await sessionModelKind(modelId)) === "claude" ? "haiku" : "";
+}
+
+/** Article ids inside one message: "<requestId>-1", "<requestId>-2", ... */
+export const articleId = (requestId, index) => `${requestId}-${index + 1}`;
+
+function buildIrisMessageWith({ requestId, articles, feedPrompt, recentHeadlines, subagentModel }) {
+  const list = articles
+    .map((article, index) => `[${articleId(requestId, index)}]
+タイトル: ${article.title}
+URL: ${article.link || "(なし)"}`)
+    .join("\n\n");
+  const many = articles.length > 1;
+  const modelArg = subagentModel
+    ? `model: "${subagentModel}"`
+    : "model は指定しない（このセッションのモデルを使う。haiku 等はこの環境では使えない）";
   return `【通知判定リクエスト ${requestId}】
-これは独立した1件の判定です。このセッションで以前に届いた記事・判定・やり取りは参照せず、このメッセージ内の通知ルールと記事だけで判定してください。ただし、下の「直近に通知した記事」は重複通知を避けるためだけに使ってください。
+独立した判定です。以前に届いた記事・判定は参照せず、このメッセージのルールと記事だけで判定してください。「直近に通知した記事」は重複の判断にだけ使います。
 
 # このフィードの通知ルール
 ${feedPrompt.trim()}
 
 ${buildRecentHeadlinesSection(recentHeadlines)}
 
-# 判定対象の記事
-タイトル: ${title}
-URL: ${link || "(なし)"}
-本文: ${articleBody}
+# 判定対象の記事（${articles.length}件。タイトルとURLだけです）
+${list}
+
+# 手順
+1. 記事は自分で開かない（WebFetch・curl・Bash・Monitor を自分では使わない）。URLのある記事ごとに Agent ツールを subagent_type: "general-purpose", run_in_background: false, ${modelArg} で呼ぶ。${many ? "全記事分を1回の応答でまとめて呼び、並列に走らせる。" : ""}
+   prompt:「<URL> の記事を開いて読み（WebFetchで開けなければcurl）、次の2行だけ返す。submit_resultは使わない。1行目: 通知ルール「${feedPrompt.trim().replace(/\s+/g, " ").slice(0, 200)}」に当たる、本人についての新しい情報（出演・参加・発言・寄稿など）か: はい/いいえ（種類） 2行目: 記事が扱う出来事（何・いつ・どこ）を一言で」
+2. 全サブエージェントの報告がそろってから判定する。開けなかった記事・URLの無い記事はタイトルで判定。
 
 # 判定基準
-1. 上の「通知ルール」に沿っているか。ルールが除外を指示している内容なら通知しない。
-2. 「直近に通知した記事」と同じ出来事（同じ公演・イベント・ニュースについての別媒体の記事、X/ソーシャル投稿、実質同じ内容の続報）なら、通知しない（NO）。新しい事実（日程変更、新たな出演者、公演の追加など）が明確に加わっている場合だけYES。
-3. 本文が無い・不十分なときは、URLを開いて確かめてよい。
-4. 判断に迷う場合は、通知する側（YES）に倒す。ただし重複の判断（2）が優先です。
+1. 「通知ルール」に沿っているか。ルールが除外を指示している内容なら通知しない。
+2. 「直近に通知した記事」と同じ出来事（同じ公演・イベント・ニュースの別媒体の記事、X/ソーシャル投稿、実質同じ内容の続報）なら NO。新しい事実（日程変更、新たな出演者、公演の追加など）が明確に加わっている場合だけYES。${many ? "\n3. 今回の記事どうしが同じ出来事なら、YESにするのは最初の1件だけ。" : ""}
+${many ? "4" : "3"}. 迷ったら YES。ただし重複の判断が優先。
 
 # 回答方法
-submit_result（kind: done）で、次のどちらかの形式の1行だけを出してください。リクエストIDは必ずそのまま先頭に書くこと。
-${requestId}: YES | <30文字以内の理由>
-${requestId}: NO | <30文字以内の理由>`;
+submit_result（kind: done）を1回だけ呼び、記事ごとに1行（${articles.length}行）。記事IDをそのまま行頭に書く:
+${articles.map((_, index) => `${articleId(requestId, index)}: YES または NO | <30文字以内の理由>`).join("\n")}`;
+}
+
+export function buildIrisMessage({ requestId, articles, title, link, feedPrompt, recentHeadlines = [], subagentModel = "" }) {
+  const list = articles || [{ title, link }];
+  // Stay under iris' message size limit: drop the oldest headlines first.
+  let headlines = recentHeadlines;
+  let text = buildIrisMessageWith({ requestId, articles: list, feedPrompt, recentHeadlines: headlines, subagentModel });
+  while (text.length > IRIS_MAX_MESSAGE_CHARS && headlines.length > 0) {
+    headlines = headlines.slice(0, -1);
+    text = buildIrisMessageWith({ requestId, articles: list, feedPrompt, recentHeadlines: headlines, subagentModel });
+  }
+  return text;
 }
 
 /** Wait until the session has no running turn and nothing queued. */
@@ -504,11 +584,10 @@ async function createJudgeSession(previous) {
   if (Date.now() - lastCreated < IRIS_MIN_RECREATE_INTERVAL_MS) {
     throw new IrisDefer("judge session needs replacing but one was created less than an hour ago");
   }
-  const response = await irisFetch("/api/sessions", {
-    method: "POST",
-    // No modelId: iris uses its work-session default.
-    body: JSON.stringify({ title: IRIS_SESSION_TITLE, message: IRIS_SETUP_MESSAGE }),
-  });
+  const body = { title: IRIS_SESSION_TITLE, message: IRIS_SETUP_MESSAGE };
+  // Normally no modelId: iris uses its work-session default.
+  if (process.env.IRIS_MODEL_ID) body.modelId = process.env.IRIS_MODEL_ID;
+  const response = await irisFetch("/api/sessions", { method: "POST", body: JSON.stringify(body) });
   if (!response.ok) throw new IrisDefer(`iris session creation HTTP ${response.status}`);
   const { id } = await response.json();
   if (typeof id !== "string" || !id) throw new Error("iris returned an invalid session id");
@@ -584,6 +663,10 @@ async function usableSession(pointer) {
   return waitForIdle(pointer.id, view);
 }
 
+/**
+ * Send one judgment message for up to IRIS_BATCH_SIZE articles.
+ * @returns per-article decision (null when the reply had no line for it) plus turn info.
+ */
 async function judgeOnce(params, allowRecreate = true) {
   let pointer = await readPointer();
   let view = await usableSession(pointer);
@@ -600,11 +683,12 @@ async function judgeOnce(params, allowRecreate = true) {
   }
   const baseTurns = view.session.turns;
   const requestId = newRequestId();
+  const subagentModel = await subagentModelFor(view.session.modelId);
   const startedAt = Date.now();
 
   const response = await irisFetch(`/api/sessions/${encodeURIComponent(id)}/message`, {
     method: "POST",
-    body: JSON.stringify({ text: buildIrisMessage({ ...params, requestId }) }),
+    body: JSON.stringify({ text: buildIrisMessage({ ...params, requestId, subagentModel }) }),
   });
   if (response.status === 404 || (response.status === 400 && /見つかりません/.test(await response.clone().text()))) {
     if (!allowRecreate) throw new IrisDefer("judge session vanished");
@@ -617,31 +701,38 @@ async function judgeOnce(params, allowRecreate = true) {
   const { turn, session } = await waitForTurn(id, baseTurns, requestId, startedAt + IRIS_REPLY_TIMEOUT_MS);
   const usage = turnUsage(turn);
   const turnError = usage.isError || (session.turns === turn.turn && session.status === "error");
-  const decision = parseIrisDecision(answerTexts(turn), requestId);
+  const texts = answerTexts(turn);
+  const decisions = params.articles.map((_, index) => parseIrisDecision(texts, articleId(requestId, index)));
+  const answered = decisions.filter(Boolean).length;
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   const latest = await readPointer();
   const base = latest?.id === id ? latest : pointer;
-  if (!decision && turnError) {
+  if (!answered && turnError) {
     await savePointer({ ...base, consecutiveErrors: (base.consecutiveErrors || 0) + 1 });
     throw new IrisDefer(`judge turn ${turn.turn} ended in error: ${session.lastError || "unknown"}`);
   }
   await savePointer({
     ...base,
-    judgments: (base.judgments || 0) + 1,
+    judgments: (base.judgments || 0) + answered,
     consecutiveErrors: 0,
     lastTurn: turn.turn,
     lastContextTokens: usage.contextTokens,
     lastJudgedAt: new Date().toISOString(),
   });
   console.log(
-    `[IRIS] ${requestId} turn ${turn.turn}: ${decision ? (decision.notify ? "YES" : "NO") : "unparseable"} in ${seconds}s, ${usage.calls} model calls, context ~${usage.contextTokens} tokens${usage.compacted ? ` (auto-compacted from ${usage.compacted.pre_tokens})` : ""}`,
+    `[IRIS] ${requestId} turn ${turn.turn}: ${answered}/${params.articles.length} answered (${decisions.map((d) => (d ? (d.notify ? "YES" : "NO") : "?")).join(",")}) in ${seconds}s, ${usage.calls} model calls, ${usage.subagents} subagents${subagentModel ? ` (${subagentModel})` : ""}${usage.selfFetches ? `, ${usage.selfFetches} self fetches` : ""}, context ~${usage.contextTokens} tokens${usage.compacted ? ` (auto-compacted from ${usage.compacted.pre_tokens})` : ""}`,
   );
-  const rawReply = decision?.line || answerTexts(turn).join("\n").slice(0, 500);
-  if (!decision) {
-    console.warn(`[IRIS] No answer for ${requestId}; fail-open`);
-    return { notify: true, reason: "iris判定を解釈できず通知", rawReply, error: "unparseable", requestId, turn: turn.turn };
-  }
-  return { notify: decision.notify, reason: decision.reason, rawReply, requestId, turn: turn.turn, seconds: Number(seconds), contextTokens: usage.contextTokens };
+  const fallbackReply = texts.join("\n").slice(0, 500);
+  return {
+    requestId,
+    turn: turn.turn,
+    seconds: Number(seconds),
+    contextTokens: usage.contextTokens,
+    subagents: usage.subagents,
+    decisions: decisions.map((decision) =>
+      decision ? { notify: decision.notify, reason: decision.reason, rawReply: decision.line } : { missing: true, rawReply: fallbackReply },
+    ),
+  };
 }
 
 // Once iris was found unusable in this run, defer the remaining articles at once
@@ -659,30 +750,64 @@ async function defer(key, reason) {
   return { notify: false, deferred: true, error: reason, reason: `iris判定保留: ${reason}` };
 }
 
-export async function shouldNotifyViaIris({ title, body, link, feedPrompt, entryKey }) {
+const articleKey = (article) => article.entryKey || article.link || article.title;
+
+/**
+ * Judge several articles of one feed via iris. Only title and link are sent;
+ * the judge has subagents open the URLs. Returns one decision per article, in order.
+ * @param {{ articles: { title: string, link?: string, entryKey?: string }[], feedPrompt?: string }} params
+ */
+export async function shouldNotifyBatchViaIris({ articles, feedPrompt }) {
   if (!feedPrompt?.trim()) {
-    return { notify: true, skipped: true, reason: "No feed prompt; notifying" };
+    return articles.map(() => ({ notify: true, skipped: true, reason: "No feed prompt; notifying" }));
   }
-  const key = entryKey || link || title;
-  if (deferredThisRun) return defer(key, deferredThisRun);
-  let locked = false;
-  try {
-    await acquireLock();
-    locked = true;
-    const recentHeadlines = await loadRecentNotifiedHeadlines({ excludeKey: key });
-    const decision = await judgeOnce({ title, body, link, feedPrompt, recentHeadlines });
-    await clearDeferral(key);
-    return decision;
-  } catch (error) {
-    if (error instanceof IrisDefer) {
-      deferredThisRun = error.message;
-      return defer(key, error.message);
+  const results = [];
+  for (let start = 0; start < articles.length; start += IRIS_BATCH_SIZE) {
+    const chunk = articles.slice(start, start + IRIS_BATCH_SIZE);
+    if (deferredThisRun) {
+      for (const article of chunk) results.push(await defer(articleKey(article), deferredThisRun));
+      continue;
     }
-    console.warn(`[IRIS] Judge failed, notifying anyway: ${error.message}`);
-    return { notify: true, error: error.message, reason: "iris判定失敗のため通知" };
-  } finally {
-    if (locked) await releaseLock().catch(() => {});
+    let locked = false;
+    try {
+      await acquireLock();
+      locked = true;
+      const recentHeadlines = await loadRecentNotifiedHeadlines({ excludeKey: chunk.length === 1 ? articleKey(chunk[0]) : undefined });
+      const outcome = await judgeOnce({ articles: chunk.map(({ title, link }) => ({ title, link })), feedPrompt, recentHeadlines });
+      for (let i = 0; i < chunk.length; i++) {
+        const key = articleKey(chunk[i]);
+        const decision = outcome.decisions[i];
+        const meta = { requestId: outcome.requestId, turn: outcome.turn, seconds: outcome.seconds, contextTokens: outcome.contextTokens };
+        if (decision.missing) {
+          // No answer line for this article: judge it again next run rather than guess.
+          const deferred = await defer(key, `no answer line for ${articleId(outcome.requestId, i)}`);
+          results.push({ ...deferred, ...meta, rawReply: decision.rawReply, error: deferred.error || "unparseable" });
+          continue;
+        }
+        await clearDeferral(key);
+        // A YES is the newest "already notified" headline for the next chunk.
+        if (decision.notify) rememberNotifiedThisRun(chunk[i]);
+        results.push({ ...decision, ...meta });
+      }
+    } catch (error) {
+      if (error instanceof IrisDefer) {
+        deferredThisRun = error.message;
+        for (const article of chunk) results.push(await defer(articleKey(article), error.message));
+        continue;
+      }
+      console.warn(`[IRIS] Judge failed, notifying anyway: ${error.message}`);
+      for (const _ of chunk) results.push({ notify: true, error: error.message, reason: "iris判定失敗のため通知" });
+    } finally {
+      if (locked) await releaseLock().catch(() => {});
+    }
   }
+  return results;
+}
+
+/** Single-article form of shouldNotifyBatchViaIris. */
+export async function shouldNotifyViaIris({ title, link, feedPrompt, entryKey }) {
+  const [decision] = await shouldNotifyBatchViaIris({ articles: [{ title, link, entryKey }], feedPrompt });
+  return decision;
 }
 
 export async function shouldNotifyCombined(params) {
@@ -697,12 +822,30 @@ export async function shouldNotifyCombined(params) {
   if (iris.deferred) return { ...iris, aiModel: mode };
   if (mode === "iris") {
     // The iris judge is the only judge: a duplicate NO is final.
-    if (iris.notify) rememberNotifiedThisRun(params);
+    // (shouldNotifyBatchViaIris already remembered a YES for this run.)
     return { ...iris, aiModel: "iris" };
   }
   const notify = gpt.notify || iris.notify;
   // Remember whatever actually goes out, so a twin article later in this same
   // run (history.json is only written after the feed loop) is still suppressed.
-  if (notify) rememberNotifiedThisRun(params);
+  if (notify && !iris.notify) rememberNotifiedThisRun(params);
   return { notify, rawReply: `gpt-oss: ${gpt.rawReply || gpt.reason || ""}\niris: ${iris.rawReply || iris.reason || ""}`, reason: `gpt-oss=${gpt.notify ? "YES" : "NO"}; iris=${iris.notify ? "YES" : "NO"}`, aiModel: "hybrid" };
+}
+
+/**
+ * Judge all new articles of one feed. In iris mode only title+link are sent and
+ * the articles are batched; the other modes still judge one article at a time
+ * with the article body (fetched through `loadBody`).
+ */
+export async function judgeArticles({ articles, feedPrompt, loadBody }) {
+  if (getFilterMode() === "iris") {
+    const decisions = await shouldNotifyBatchViaIris({ articles, feedPrompt });
+    return decisions.map((decision) => ({ ...decision, aiModel: "iris" }));
+  }
+  const decisions = [];
+  for (const article of articles) {
+    const body = loadBody ? await loadBody(article) : undefined;
+    decisions.push(await shouldNotifyCombined({ ...article, body: body || undefined, feedPrompt }));
+  }
+  return decisions;
 }

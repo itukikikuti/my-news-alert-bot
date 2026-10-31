@@ -12,7 +12,7 @@ import {
 } from "./lib.js";
 import { sendFcmNotification, isFcmEnabled } from "./fcm.js";
 import { fetchArticleText } from "./article.js";
-import { shouldNotifyCombined } from "./ai-filter.js";
+import { judgeArticles } from "./ai-filter.js";
 
 const parser = new Parser();
 
@@ -78,39 +78,51 @@ async function checkAndNotify() {
       );
 
       // Process items oldest-first so notifications arrive in chronological order.
-      // Every unseen entry is notified; there is no duplicate suppression.
+      // Unseen entries are judged by the AI filter (duplicates of recently
+      // notified events are suppressed there).
       const orderedItems = [...items];
       const toNotify = [];
 
+      // Collect this feed's unseen entries first so the AI judge can take them
+      // in one batch (iris mode sends only title + original URL).
+      const candidates = [];
       for (const item of orderedItems) {
         const entryKey = deriveEntryKey(item);
         if (seenKeys.has(entryKey)) {
           continue;
         }
         seenKeys.add(entryKey);
-
-        const title = cleanText(item.title) || "(no title)";
-        const link = extractOriginalUrl(item.link);
-        const summary = item.contentSnippet || item.summary || item.content || "";
-        const publishedAt = item.isoDate || item.pubDate || item.published || item.updated || null;
-
-        // Prefer the full article body; fall back to title+link only when the
-        // page cannot be fetched or no article text is extracted.
-        const articleText = link ? await fetchArticleText(link) : null;
-        if (!articleText) {
-          console.warn(`[ARTICLE] Falling back to title+link for ${link || title}`);
-        }
-
-        // Ask the LLM whether this article should be notified at all.
-        // No prompt means no API call: notify every updated entry.
-        // Fail-open: a disabled or failing filter still notifies.
-        const decision = await shouldNotifyCombined({
-          title,
-          body: articleText || undefined,
-          link,
-          feedPrompt,
+        candidates.push({
+          title: cleanText(item.title) || "(no title)",
+          // Google Alerts links are google.com/url?...&url=<article>; unwrap them.
+          link: extractOriginalUrl(item.link),
           entryKey,
+          publishedAt: item.isoDate || item.pubDate || item.published || item.updated || null,
         });
+      }
+
+      // The article body is only needed for the notification text (and for the
+      // gpt-oss judge); fetch each page at most once.
+      const bodies = new Map();
+      const loadBody = async ({ link, title, entryKey }) => {
+        if (!bodies.has(entryKey)) {
+          const text = link ? await fetchArticleText(link) : null;
+          if (!text) console.warn(`[ARTICLE] Falling back to title+link for ${link || title}`);
+          bodies.set(entryKey, text);
+        }
+        return bodies.get(entryKey);
+      };
+
+      // Ask the LLM whether each article should be notified at all.
+      // No prompt means no API call: notify every updated entry.
+      // Fail-open: a disabled or failing filter still notifies.
+      const decisions = candidates.length
+        ? await judgeArticles({ articles: candidates, feedPrompt, loadBody })
+        : [];
+
+      for (let index = 0; index < candidates.length; index++) {
+        const { title, link, entryKey, publishedAt } = candidates[index];
+        const decision = decisions[index];
         if (decision.deferred) {
           // iris could not judge right now (busy, unreachable, no reply yet).
           // Leave the entry unseen so the next run judges it again.
@@ -138,6 +150,7 @@ async function checkAndNotify() {
           continue;
         }
 
+        const articleText = await loadBody(candidates[index]);
         toNotify.push({
           title,
           body: articleText || undefined,
