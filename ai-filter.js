@@ -158,7 +158,7 @@ export async function shouldNotify({ title, body, feedPrompt, entryKey }) {
 //     runs), so two messages are never in flight in the session at once.
 //   - When iris is busy/unreachable the article is deferred (left unseen and
 //     retried next run) instead of being guessed; after IRIS_MAX_DEFERRALS
-//     retries it falls back to the old fail-open behaviour (notify).
+//     retries it is dropped without notifying (logged and shown as skipped).
 // The model is iris' work-session default; IRIS_MODEL_ID (unset by default)
 // only applies when a new judge session has to be created.
 // ---------------------------------------------------------------------------
@@ -455,17 +455,63 @@ function turnUsage(turn) {
 
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** Find "<requestId>: YES|NO ..." in the turn's answers (last one wins). */
+const ANY_REQUEST_ID = /REQ-[A-Z0-9]+-[0-9A-F]+/i;
+const ARTICLE_NUMBERS = "\\d+(?:\\s*(?:[,、，]\\s*-?|[〜~～-])\\s*\\d+)*";
+const ANSWER_TAIL = "[\\]】)）]?\\s*\\**\\s*[:：]\\s*\\**\\s*(YES|NO)\\b(.*)";
+const LINE_START = "^[\\s\\-*・]*[\\[【(（]?\\**\\s*";
+
+/** Whether "1", "1,2", "1, -2" or "2〜5" includes the article number. */
+function coversArticle(numbers, number) {
+  return numbers.replace(/[,、，]\s*-/g, ",").split(/[,、，]/).some((part) => {
+    const match = part.trim().match(/^(\d+)(?:\s*[〜~～-]\s*(\d+))?$/);
+    return match && number >= Number(match[1]) && number <= Number(match[2] ?? match[1]);
+  });
+}
+
+/**
+ * The judge also shortens ids: "FA8EE1-1: NO", "FA8EE1-2〜5: NO", or a bare
+ * "1: NO" under a "REQ-…:" header line. Bare numbers only count below this
+ * request's own header, so another request's answers are never taken for ours.
+ */
+function shortAnswerMatcher(id) {
+  const parts = id.match(/^(REQ-[^-]+-([^-]+))-(\d+)$/);
+  if (!parts) return null;
+  const number = Number(parts[3]);
+  const request = `(?:${escapeRegExp(parts[1])}|${escapeRegExp(parts[2])})`;
+  const header = new RegExp(`${LINE_START}${request}[\\s\\]】)）*:：]*$`);
+  const withRequest = new RegExp(`${LINE_START}${request}-\\s*(${ARTICLE_NUMBERS})${ANSWER_TAIL}`);
+  const bare = new RegExp(`${LINE_START}(${ARTICLE_NUMBERS})${ANSWER_TAIL}`);
+  const scopes = (lines) => {
+    let inScope = false;
+    return lines.map((line) => {
+      if (header.test(line)) inScope = true;
+      else if (ANY_REQUEST_ID.test(line) && !line.includes(parts[1])) inScope = false;
+      return inScope;
+    });
+  };
+  const match = (line, inScope) => {
+    const found = line.match(withRequest) || (inScope ? line.match(bare) : null);
+    return found && coversArticle(found[1], number) ? [found[2], found[3]] : null;
+  };
+  return { scopes, match };
+}
+
+/** Find this article's YES|NO line in the turn's answers (last one wins). */
 export function parseIrisDecision(texts, requestId) {
   // (?!\d) keeps "REQ-…-1" from matching the answer for "REQ-…-10".
   const pattern = new RegExp(`${escapeRegExp(requestId)}(?!\\d)\\s*[\\]】)]?\\s*[:：]?\\s*\\**\\s*(YES|NO)\\b(.*)`, "i");
+  const short = shortAnswerMatcher(requestId);
   for (const text of [...texts].reverse()) {
-    const lines = String(text).split(/\r?\n/).reverse();
-    for (const line of lines) {
-      const match = line.match(pattern);
-      if (match) {
-        const reason = match[2].replace(/^[\s|｜:：\-—*]+/, "").trim().slice(0, 100);
-        return { notify: match[1].toUpperCase() === "YES", reason: `iris=${match[1].toUpperCase()}${reason ? ` ${reason}` : ""}`, line: line.trim() };
+    const lines = String(text).split(/\r?\n/);
+    const scopes = short ? short.scopes(lines) : [];
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      const full = line.match(pattern);
+      const answer = full ? [full[1], full[2]] : short?.match(line, scopes[i]);
+      if (answer) {
+        const verdict = answer[0].toUpperCase();
+        const reason = answer[1].replace(/^[\s|｜:：\-—*]+/, "").trim().slice(0, 100);
+        return { notify: verdict === "YES", reason: `iris=${verdict}${reason ? ` ${reason}` : ""}`, line: line.trim() };
       }
     }
   }
@@ -714,8 +760,8 @@ async function defer(key, reason) {
   const count = await bumpDeferral(key).catch(() => IRIS_MAX_DEFERRALS + 1);
   if (count > IRIS_MAX_DEFERRALS) {
     await clearDeferral(key).catch(() => {});
-    console.warn(`[IRIS] Gave up after ${count - 1} deferrals, notifying anyway: ${reason}`);
-    return { notify: true, error: reason, reason: "iris判定失敗のため通知" };
+    console.warn(`[IRIS] Gave up after ${count - 1} deferrals, not notifying: ${reason}`);
+    return { notify: false, error: reason, reason: "iris判定不能のため通知せず" };
   }
   console.warn(`[IRIS] Deferring article to the next run (${count}/${IRIS_MAX_DEFERRALS}): ${reason}`);
   return { notify: false, deferred: true, error: reason, reason: `iris判定保留: ${reason}` };

@@ -208,15 +208,16 @@ test("busy session defers the article and the rest of the run", async () => {
   });
 });
 
-test("a deferred article falls back to notify after the retry limit", async () => {
+test("a deferred article is dropped without notifying after the retry limit", async () => {
   const mock = await startIrisMock();
   seedSession(mock, "fixed-1", { status: "running", updatedAt: new Date().toISOString() });
   await withJudge(mock, { IRIS_IDLE_WAIT_MS: "20" }, async (mod, dir) => {
     await fs.writeFile(path.join(dir, "iris-session.json"), JSON.stringify({ id: "fixed-1" }));
     await fs.writeFile(path.join(dir, "iris-deferrals.json"), JSON.stringify({ k: 5 }));
     const d = await mod.shouldNotifyViaIris({ title: "a", feedPrompt: rule, entryKey: "k" });
-    assert.equal(d.notify, true);
+    assert.equal(d.notify, false);
     assert.equal(d.deferred, undefined);
+    assert.match(d.reason, /通知せず/);
   });
 });
 
@@ -281,6 +282,55 @@ test("a held lock defers instead of sending concurrently", async () => {
     const d = await mod.shouldNotifyViaIris({ title: "a", feedPrompt: rule });
     assert.equal(d.deferred, true);
     assert.equal(mock.messages.length, 0);
+  });
+});
+
+test("parseIrisDecision reads the shortened forms the judge really wrote", async () => {
+  const mock = await startIrisMock();
+  await withJudge(mock, {}, async (mod) => {
+    const req = "REQ-MW83VI5L-23E6D5";
+    const verdict = (texts, n) => mod.parseIrisDecision(texts, `${req}-${n}`)?.notify;
+    const short = ["REQ-MW83VI5L-23E6D5:\n- 23E6D5-1: YES | 本人\n- 23E6D5-2: NO | 第三者"];
+    assert.equal(verdict(short, 1), true);
+    assert.equal(verdict(short, 2), false);
+    assert.equal(verdict(short, 3), undefined, "an article with no line stays unanswered");
+    assert.equal(verdict(["23E6D5-1: NO"], 1), false, "shortened id needs no header");
+    const bare = [`${req}:\n1: YES | 本人X\n2: NO | 同一投稿`];
+    assert.equal(verdict(bare, 1), true);
+    assert.equal(verdict(bare, 2), false);
+    assert.equal(mod.parseIrisDecision(bare, `${req}-1`).reason, "iris=YES 本人X");
+    const ranges = ["- 23E6D5-1: YES | a\n- 23E6D5-2〜5: NO | b"];
+    assert.equal(verdict(ranges, 1), true);
+    for (const n of [2, 3, 5]) assert.equal(verdict(ranges, n), false);
+    assert.equal(verdict(ranges, 6), undefined);
+    assert.equal(verdict(["- 23E6D5-1, -2: NO | b"], 2), false);
+    assert.equal(verdict(["23E6D5-2: 確認中\n23E6D5-1: NO", "23E6D5-1: YES | 訂正"], 1), true);
+  });
+});
+
+test("parseIrisDecision never takes another article's or request's answer", async () => {
+  const mock = await startIrisMock();
+  await withJudge(mock, {}, async (mod) => {
+    const req = "REQ-MW83VI5L-23E6D5";
+    const verdict = (text, n = 1) => mod.parseIrisDecision([text], `${req}-${n}`)?.notify;
+    assert.equal(verdict("1: YES | 見出しなし"), undefined, "bare number needs this request's header");
+    assert.equal(verdict("REQ-OTHER-AAAAAA:\n1: YES"), undefined);
+    assert.equal(verdict(`${req}:\n1: NO\nREQ-OTHER-AAAAAA:\n1: YES`), false);
+    assert.equal(verdict("AAAAAA-1: YES"), undefined);
+    assert.equal(verdict(`${req}:\n11: YES`), undefined, "article 11 is not article 1");
+    assert.equal(verdict("23E6D5-11: YES"), undefined);
+    assert.equal(verdict(`${req}: 1,2ともNO — 同一URL`), undefined, "summary lines are not answers");
+    assert.equal(verdict(`${req}:\n1: 確認中`), undefined);
+  });
+});
+
+test("an unreadable answer is never notified, even after the retry limit", async () => {
+  const mock = await startIrisMock({ answer: () => "判定できませんでした" });
+  await withJudge(mock, {}, async (mod, dir) => {
+    await fs.writeFile(path.join(dir, "iris-deferrals.json"), JSON.stringify({ k: 5 }));
+    const d = await mod.shouldNotifyViaIris({ title: "a", link: "https://x/1", feedPrompt: rule, entryKey: "k" });
+    assert.equal(d.notify, false);
+    assert.equal(d.deferred, undefined);
   });
 });
 
