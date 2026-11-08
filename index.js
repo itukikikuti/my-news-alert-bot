@@ -5,6 +5,8 @@ import {
   deriveEntryKey,
   loadState,
   saveState,
+  loadPendingArticles,
+  savePendingArticles,
   loadRSSFeeds,
   recordNotification,
   recordSkipped,
@@ -55,6 +57,7 @@ async function checkAndNotify() {
   }
 
   const state = await loadState();
+  const pending = await loadPendingArticles();
 
   for (const feedConfig of FEEDS) {
     const url = feedConfig.url;
@@ -62,7 +65,7 @@ async function checkAndNotify() {
     try {
       const feed = await parseFeedWithRetry(url);
       const items = feed.items ?? [];
-      if (items.length === 0) {
+      if (items.length === 0 && !pending[url]?.length) {
         console.log(`[SKIP] no entries for ${url}`);
         continue;
       }
@@ -86,6 +89,12 @@ async function checkAndNotify() {
       // Collect this feed's unseen entries first so the AI judge can take them
       // in one batch (iris mode sends only title + original URL).
       const candidates = [];
+      // Articles held from earlier runs come first, even if the feed dropped them.
+      for (const article of pending[url] ?? []) {
+        if (seenKeys.has(article.entryKey)) continue;
+        seenKeys.add(article.entryKey);
+        candidates.push(article);
+      }
       for (const item of orderedItems) {
         const entryKey = deriveEntryKey(item);
         if (seenKeys.has(entryKey)) {
@@ -119,6 +128,8 @@ async function checkAndNotify() {
       const decisions = candidates.length
         ? await judgeArticles({ articles: candidates, feedPrompt, loadBody })
         : [];
+
+      pending[url] = candidates.filter((_, index) => decisions[index].deferred);
 
       for (let index = 0; index < candidates.length; index++) {
         const { title, link, entryKey, publishedAt } = candidates[index];
@@ -244,6 +255,7 @@ async function checkAndNotify() {
   }
 
   await saveState(state);
+  await savePendingArticles(pending);
 }
 
 checkAndNotify().catch((err) => {

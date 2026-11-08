@@ -208,7 +208,7 @@ test("busy session defers the article and the rest of the run", async () => {
   });
 });
 
-test("a deferred article is dropped without notifying after the retry limit", async () => {
+test("an article iris gave no reply for is held past any retry limit", async () => {
   const mock = await startIrisMock();
   seedSession(mock, "fixed-1", { status: "running", updatedAt: new Date().toISOString() });
   await withJudge(mock, { IRIS_IDLE_WAIT_MS: "20" }, async (mod, dir) => {
@@ -216,8 +216,9 @@ test("a deferred article is dropped without notifying after the retry limit", as
     await fs.writeFile(path.join(dir, "iris-deferrals.json"), JSON.stringify({ k: 5 }));
     const d = await mod.shouldNotifyViaIris({ title: "a", feedPrompt: rule, entryKey: "k" });
     assert.equal(d.notify, false);
-    assert.equal(d.deferred, undefined);
-    assert.match(d.reason, /通知せず/);
+    assert.equal(d.deferred, true);
+    const counts = JSON.parse(await fs.readFile(path.join(dir, "iris-deferrals.json"), "utf8"));
+    assert.equal(counts.k, 5, "an outage does not use up the unreadable-answer retries");
   });
 });
 
@@ -331,6 +332,7 @@ test("an unreadable answer is never notified, even after the retry limit", async
     const d = await mod.shouldNotifyViaIris({ title: "a", link: "https://x/1", feedPrompt: rule, entryKey: "k" });
     assert.equal(d.notify, false);
     assert.equal(d.deferred, undefined);
+    assert.match(d.reason, /通知せず/);
   });
 });
 

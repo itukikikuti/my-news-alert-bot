@@ -156,9 +156,11 @@ export async function shouldNotify({ title, body, feedPrompt, entryKey }) {
 //     earlier article can therefore never be taken for the current one.
 //   - <data>/iris-judge.lock serialises judges across processes (cron, manual
 //     runs), so two messages are never in flight in the session at once.
-//   - When iris is busy/unreachable the article is deferred (left unseen and
-//     retried next run) instead of being guessed; after IRIS_MAX_DEFERRALS
-//     retries it is dropped without notifying (logged and shown as skipped).
+//   - When iris gives no reply (busy/unreachable/failing) the article is held
+//     and retried every run, with no limit, until iris can judge it.
+//   - When the reply has no readable answer the article is retried, and after
+//     IRIS_MAX_DEFERRALS retries dropped without notifying (logged and shown
+//     as skipped).
 // The model is iris' work-session default; IRIS_MODEL_ID (unset by default)
 // only applies when a new judge session has to be created.
 // ---------------------------------------------------------------------------
@@ -756,6 +758,13 @@ async function judgeOnce(params, allowRecreate = true) {
 // instead of waiting for the lock/session timeouts again for each of them.
 let deferredThisRun = null;
 
+/** iris gave no reply at all: keep the article for a later run, however long that takes. */
+function holdForIris(reason) {
+  console.warn(`[IRIS] Holding article for the next run: ${reason}`);
+  return { notify: false, deferred: true, error: reason, reason: `iris判定保留: ${reason}` };
+}
+
+/** iris replied but this article's answer could not be read. */
 async function defer(key, reason) {
   const count = await bumpDeferral(key).catch(() => IRIS_MAX_DEFERRALS + 1);
   if (count > IRIS_MAX_DEFERRALS) {
@@ -782,7 +791,7 @@ export async function shouldNotifyBatchViaIris({ articles, feedPrompt }) {
   for (let start = 0; start < articles.length; start += IRIS_BATCH_SIZE) {
     const chunk = articles.slice(start, start + IRIS_BATCH_SIZE);
     if (deferredThisRun) {
-      for (const article of chunk) results.push(await defer(articleKey(article), deferredThisRun));
+      for (const _ of chunk) results.push(holdForIris(deferredThisRun));
       continue;
     }
     let locked = false;
@@ -806,13 +815,8 @@ export async function shouldNotifyBatchViaIris({ articles, feedPrompt }) {
         results.push({ ...decision, ...meta });
       }
     } catch (error) {
-      if (error instanceof IrisDefer) {
-        deferredThisRun = error.message;
-        for (const article of chunk) results.push(await defer(articleKey(article), error.message));
-        continue;
-      }
-      console.warn(`[IRIS] Judge failed, notifying anyway: ${error.message}`);
-      for (const _ of chunk) results.push({ notify: true, error: error.message, reason: "iris判定失敗のため通知" });
+      deferredThisRun = error.message;
+      for (const _ of chunk) results.push(holdForIris(error.message));
     } finally {
       if (locked) await releaseLock().catch(() => {});
     }

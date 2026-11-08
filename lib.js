@@ -162,6 +162,29 @@ export async function saveState(state) {
   await fs.writeFile(stateFile, JSON.stringify(state, null, 2), "utf-8");
 }
 
+// Articles iris could not judge yet. Kept apart from the feed because an entry
+// can scroll out of the feed while iris is down.
+function getPendingFile() {
+  return path.join(path.dirname(getStateFile()), "pending-articles.json");
+}
+
+export async function loadPendingArticles() {
+  try {
+    return JSON.parse(await fs.readFile(getPendingFile(), "utf-8"));
+  } catch (e) {
+    if (e.code !== "ENOENT") {
+      console.error("[WARN] Failed to load pending articles:", e);
+    }
+    return {};
+  }
+}
+
+export async function savePendingArticles(pending) {
+  const file = getPendingFile();
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(pending, null, 2), "utf-8");
+}
+
 export async function loadHistory() {
   const historyFile = getHistoryFile();
   try {
